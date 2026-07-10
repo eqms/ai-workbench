@@ -1,0 +1,110 @@
+//! AI backend selection.
+//!
+//! AI Workbench drives one of several AI coding-agent CLIs in its primary
+//! (AI) pane. The concrete backend is chosen via a positional CLI argument
+//! (`ai-workbench claude|opencode|pi`) and persisted across runs. Every other
+//! pane (file browser, preview, LazyGit, terminal) is backend-agnostic.
+
+use serde::{Deserialize, Serialize};
+
+/// The AI coding agent driven in the primary pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AiBackend {
+    /// Anthropic Claude Code CLI (`claude`). Supports permission/model/effort flags.
+    #[default]
+    Claude,
+    /// OpenCode CLI (`opencode`).
+    OpenCode,
+    /// Pi CLI (`pi`).
+    Pi,
+}
+
+impl AiBackend {
+    /// Parse a user-supplied backend name, case-insensitively.
+    /// Accepts e.g. "claude", "Claude", "opencode", "OpenCode", "pi", "Pi".
+    pub fn parse(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "claude" => Some(Self::Claude),
+            "opencode" => Some(Self::OpenCode),
+            "pi" => Some(Self::Pi),
+            _ => None,
+        }
+    }
+
+    /// All backends, in display order.
+    pub fn all() -> [Self; 3] {
+        [Self::Claude, Self::OpenCode, Self::Pi]
+    }
+
+    /// The default executable name looked up on `$PATH`.
+    pub fn binary_name(&self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::OpenCode => "opencode",
+            Self::Pi => "pi",
+        }
+    }
+
+    /// Canonical lowercase identifier (used for CLI parsing / persistence).
+    pub fn id(&self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::OpenCode => "opencode",
+            Self::Pi => "pi",
+        }
+    }
+
+    /// Title shown on the AI pane border (with surrounding spaces).
+    pub fn pane_title(&self) -> &'static str {
+        match self {
+            Self::Claude => " Claude Code ",
+            Self::OpenCode => " OpenCode ",
+            Self::Pi => " Pi ",
+        }
+    }
+
+    /// Short label shown in the footer hotkey row.
+    pub fn short_label(&self) -> &'static str {
+        match self {
+            Self::Claude => "Claude",
+            Self::OpenCode => "OpenCode",
+            Self::Pi => "Pi",
+        }
+    }
+
+    /// Whether this backend understands the Claude-specific startup flags
+    /// (`--permission-mode`, `--model`, `--effort`, `--name`, `--worktree`,
+    /// `--remote-control`, `--dangerously-skip-permissions`). Only Claude does.
+    pub fn supports_claude_flags(&self) -> bool {
+        matches!(self, Self::Claude)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_is_case_insensitive() {
+        assert_eq!(AiBackend::parse("claude"), Some(AiBackend::Claude));
+        assert_eq!(AiBackend::parse("Claude"), Some(AiBackend::Claude));
+        assert_eq!(AiBackend::parse("OpenCode"), Some(AiBackend::OpenCode));
+        assert_eq!(AiBackend::parse("opencode"), Some(AiBackend::OpenCode));
+        assert_eq!(AiBackend::parse("Pi"), Some(AiBackend::Pi));
+        assert_eq!(AiBackend::parse("  pi  "), Some(AiBackend::Pi));
+        assert_eq!(AiBackend::parse("gpt"), None);
+    }
+
+    #[test]
+    fn default_is_claude() {
+        assert_eq!(AiBackend::default(), AiBackend::Claude);
+    }
+
+    #[test]
+    fn only_claude_supports_flags() {
+        assert!(AiBackend::Claude.supports_claude_flags());
+        assert!(!AiBackend::OpenCode.supports_claude_flags());
+        assert!(!AiBackend::Pi.supports_claude_flags());
+    }
+}

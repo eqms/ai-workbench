@@ -1,0 +1,221 @@
+//! Platform-specific file opening utilities
+
+use anyhow::Result;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+
+/// Detach the child's standard streams from the workbench TTY.
+///
+/// Every `open`/`xdg-open`/browser/editor spawn goes through this. Without it,
+/// a misconfigured handler that resolves to a console browser (w3m/lynx on a
+/// headless Linux host) inherits the TUI's stdin/stdout/stderr and hijacks the
+/// terminal, corrupting the alternate screen. Redirecting to `/dev/null` makes
+/// such a fallback terminate immediately instead of grabbing the TTY. Mirrors
+/// the pattern already used for clipboard subprocesses in `clipboard.rs`.
+fn detached(cmd: &mut std::process::Command) -> &mut std::process::Command {
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+}
+
+/// Canonicalize `path` before passing it as a `Command::arg()` argument.
+///
+/// Canonicalizing an existing path always yields an absolute path (starts
+/// with `/` on Unix, a drive letter on Windows), which can never be parsed
+/// as a leading-dash CLI flag by `open`/`xdg-open`/`explorer`/`start` — this
+/// closes the flag-injection finding for filenames beginning with `-`.
+///
+/// If the path does not exist (or canonicalization otherwise fails), falls
+/// back to the original path unchanged rather than erroring or panicking.
+fn resolve_for_arg(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Opens a file with the system's default application
+pub fn open_file(path: &Path) -> Result<()> {
+    let path = resolve_for_arg(path);
+
+    #[cfg(target_os = "macos")]
+    {
+        detached(std::process::Command::new("open").arg(&path)).spawn()?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        detached(std::process::Command::new("xdg-open").arg(&path)).spawn()?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        detached(
+            std::process::Command::new("cmd")
+                .args(["/c", "start", ""])
+                .arg(&path),
+        )
+        .spawn()?;
+    }
+
+    Ok(())
+}
+
+/// Opens a directory in the system file manager
+pub fn open_in_file_manager(path: &Path) -> Result<()> {
+    let path = resolve_for_arg(path);
+
+    #[cfg(target_os = "macos")]
+    {
+        detached(std::process::Command::new("open").arg(&path)).spawn()?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        detached(std::process::Command::new("xdg-open").arg(&path)).spawn()?;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        detached(std::process::Command::new("explorer").arg(&path)).spawn()?;
+    }
+
+    Ok(())
+}
+
+/// Check if file can be previewed in browser/external viewer
+pub fn can_preview_in_browser(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase());
+
+    // Native browser/viewer types
+    if matches!(
+        ext.as_deref(),
+        Some(
+            "html"
+                | "htm"
+                | "md"
+                | "markdown"
+                | "mdown"
+                | "mkd"
+                | "pdf"
+                | "png"
+                | "jpg"
+                | "jpeg"
+                | "gif"
+                | "svg"
+                | "webp"
+        )
+    ) {
+        return true;
+    }
+
+    // Text files that can be syntax-highlighted
+    crate::browser::syntax::can_syntax_highlight(path)
+}
+
+/// Validate that a program name contains only safe characters.
+/// Accepts: ASCII alphanumerics, `_`, `-`, `.`, `/`, `+`.
+/// Rejects: empty strings, spaces, shell metacharacters (`;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, etc.).
+fn validate_program(prog: &str) -> Result<()> {
+    if prog.is_empty()
+        || !prog
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | '+'))
+    {
+        anyhow::bail!("Unsafe program name in browser/editor config: {:?}", prog);
+    }
+    Ok(())
+}
+
+/// Opens a file with a specific browser, or falls back to system default
+pub fn open_file_with_browser(path: &Path, browser: &str) -> Result<()> {
+    if browser.is_empty() {
+        open_file(path)
+    } else {
+        let tokens = shlex::split(browser).ok_or_else(|| {
+            anyhow::anyhow!("Invalid shell quoting in browser config: {:?}", browser)
+        })?;
+        let program = tokens
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("Empty browser command"))?;
+        validate_program(program)?;
+        detached(
+            std::process::Command::new(program)
+                .args(&tokens[1..])
+                .arg(path),
+        )
+        .spawn()?;
+        Ok(())
+    }
+}
+
+/// Opens a file with an external GUI editor
+pub fn open_file_with_editor(path: &Path, editor: &str) -> Result<()> {
+    if editor.is_empty() {
+        anyhow::bail!("No external editor configured");
+    }
+    let tokens = shlex::split(editor)
+        .ok_or_else(|| anyhow::anyhow!("Invalid shell quoting in editor config: {:?}", editor))?;
+    let program = tokens
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("Empty editor command"))?;
+    validate_program(program)?;
+    detached(
+        std::process::Command::new(program)
+            .args(&tokens[1..])
+            .arg(path),
+    )
+    .spawn()?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_for_arg_canonicalizes_existing_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_path = dir.path().join("-dashfile.txt");
+        std::fs::write(&file_path, b"test").expect("write test file");
+        let resolved = resolve_for_arg(&file_path);
+        assert!(resolved.is_absolute(), "got: {:?}", resolved);
+    }
+
+    #[test]
+    fn test_resolve_for_arg_falls_back_on_missing_path() {
+        let missing = Path::new("does-not-exist-xyz-260702.txt");
+        let resolved = resolve_for_arg(missing);
+        assert_eq!(resolved, missing.to_path_buf());
+    }
+
+    #[test]
+    fn test_validate_program_accepts_safe_names() {
+        assert!(validate_program("firefox").is_ok());
+        assert!(validate_program("open").is_ok());
+        assert!(validate_program("/usr/bin/xdg-open").is_ok());
+        assert!(validate_program("open-a-browser").is_ok());
+        assert!(validate_program("g++").is_ok());
+    }
+
+    #[test]
+    fn test_validate_program_rejects_metacharacters() {
+        assert!(validate_program("").is_err(), "empty must be rejected");
+        assert!(validate_program("fire;fox").is_err(), "semicolon");
+        assert!(validate_program("$(rm -rf /)").is_err(), "subshell");
+        assert!(validate_program("a b").is_err(), "space");
+        assert!(validate_program("a|b").is_err(), "pipe");
+        assert!(validate_program("a&b").is_err(), "ampersand");
+        assert!(validate_program("a`b`").is_err(), "backtick");
+    }
+}
+
+/// Check if file is a markdown file
+pub fn is_markdown(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase());
+
+    matches!(ext.as_deref(), Some("md" | "markdown" | "mdown" | "mkd"))
+}

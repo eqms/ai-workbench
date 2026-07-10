@@ -1,0 +1,384 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to update Homebrew formula for (e.g. v0.96.0)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x64 (ubuntu-22.04 for GLIBC 2.35 compatibility with Debian 12+)
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            binary_name: ai-workbench
+            # Asset name follows self_update convention: {bin}-{target}.tar.gz
+            asset_name: ai-workbench-x86_64-unknown-linux-gnu.tar.gz
+            archive_type: tar.gz
+
+          # Linux ARM64 (cross-compiled, ubuntu-22.04 for GLIBC compatibility)
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
+            binary_name: ai-workbench
+            asset_name: ai-workbench-aarch64-unknown-linux-gnu.tar.gz
+            archive_type: tar.gz
+            cross: true
+
+          # macOS Apple Silicon (M1/M2/M3/M4)
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            binary_name: ai-workbench
+            asset_name: ai-workbench-aarch64-apple-darwin.tar.gz
+            archive_type: tar.gz
+
+          # macOS Intel (cross-compiled from ARM64 runner)
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            binary_name: ai-workbench
+            asset_name: ai-workbench-x86_64-apple-darwin.tar.gz
+            archive_type: tar.gz
+
+          # Windows x64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            binary_name: ai-workbench.exe
+            asset_name: ai-workbench-x86_64-pc-windows-msvc.zip
+            archive_type: zip
+
+          # Windows ARM64
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            binary_name: ai-workbench.exe
+            asset_name: ai-workbench-aarch64-pc-windows-msvc.zip
+            archive_type: zip
+
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: ${{ matrix.target }}
+
+      # Install cross for ARM64 Linux cross-compilation
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross --tag v0.2.5
+
+      # Install ARM64 cross-compilation tools for Linux
+      - name: Install cross-compilation tools
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      # Build with cross for ARM64 Linux
+      - name: Build (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }}
+
+      # Build natively for other platforms
+      - name: Build (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --target ${{ matrix.target }}
+
+      # Create tar.gz archive (Unix)
+      - name: Create archive (Unix)
+        if: matrix.archive_type == 'tar.gz'
+        run: |
+          cd target/${{ matrix.target }}/release
+          chmod +x ${{ matrix.binary_name }}
+          tar czvf ../../../${{ matrix.asset_name }} ${{ matrix.binary_name }}
+
+      # Create zip archive (Windows)
+      - name: Create archive (Windows)
+        if: matrix.archive_type == 'zip'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" -DestinationPath "${{ matrix.asset_name }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ matrix.asset_name }}
+          path: ${{ matrix.asset_name }}
+
+  release:
+    name: Create Release
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          find artifacts -type f -exec mv {} release/ \;
+          ls -la release/
+
+      - name: Get previous tag
+        id: prev_tag
+        run: |
+          # Get the tag before the current one
+          PREV_TAG=$(git describe --tags --abbrev=0 ${{ github.ref_name }}^ 2>/dev/null || echo "")
+          echo "Previous tag: $PREV_TAG"
+          echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG="${{ steps.prev_tag.outputs.prev_tag }}"
+          CURRENT_TAG="${{ github.ref_name }}"
+
+          echo "Generating changelog from $PREV_TAG to $CURRENT_TAG"
+
+          if [ -n "$PREV_TAG" ]; then
+            # Get commits between tags, format nicely
+            CHANGELOG=$(git log ${PREV_TAG}..${CURRENT_TAG} --pretty=format:"- %s" --no-merges | head -20)
+          else
+            # First release, get recent commits
+            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges -10)
+          fi
+
+          # Escape for GitHub Actions multiline output
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
+        with:
+          name: AI Workbench ${{ github.ref_name }}
+          body: |
+            ## AI Workbench ${{ github.ref_name }}
+
+            ### What's Changed
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ### Downloads
+
+            | Platform | Architecture | Download |
+            |----------|--------------|----------|
+            | Linux | x64 | `ai-workbench-x86_64-unknown-linux-gnu.tar.gz` |
+            | Linux | ARM64 | `ai-workbench-aarch64-unknown-linux-gnu.tar.gz` |
+            | macOS | Apple Silicon (M1/M2/M3/M4) | `ai-workbench-aarch64-apple-darwin.tar.gz` |
+            | macOS | Intel | `ai-workbench-x86_64-apple-darwin.tar.gz` |
+            | Windows | x64 | `ai-workbench-x86_64-pc-windows-msvc.zip` |
+            | Windows | ARM64 | `ai-workbench-aarch64-pc-windows-msvc.zip` |
+
+            ### Installation
+
+            **Homebrew (macOS / Linux):**
+            ```bash
+            brew install eqms/ai-workbench/ai-workbench
+            ```
+
+            **Unix (Linux/macOS):**
+            ```bash
+            # Download and extract
+            tar xzf ai-workbench-*.tar.gz
+            chmod +x ai-workbench
+            ./ai-workbench
+            ```
+
+            **Windows:**
+            ```powershell
+            # Extract zip and run
+            Expand-Archive ai-workbench-*.zip -DestinationPath .
+            .\ai-workbench.exe
+            ```
+
+            ### Auto-Update
+
+            AI Workbench includes built-in auto-update functionality. Updates are checked automatically on startup.
+
+            See [README](https://github.com/${{ github.repository }}/blob/main/README.md) for full documentation.
+          files: release/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-homebrew-tap:
+    name: Update Homebrew Formula
+    runs-on: ubuntu-latest
+    needs: [release]
+    if: always() && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch')
+    steps:
+      - name: Determine release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Download Homebrew assets and compute SHA256
+        id: hashes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          VERSION="${TAG#v}"
+          echo "Updating formula for $TAG (version $VERSION)"
+
+          # Four Homebrew targets (no Windows)
+          TARGETS=(
+            "aarch64-apple-darwin"
+            "x86_64-apple-darwin"
+            "aarch64-unknown-linux-gnu"
+            "x86_64-unknown-linux-gnu"
+          )
+
+          mkdir -p /tmp/assets
+
+          # Download each asset and compute sha256
+          for TARGET in "${TARGETS[@]}"; do
+            ASSET="ai-workbench-${TARGET}.tar.gz"
+            echo "Downloading $ASSET ..."
+            gh release download "$TAG" \
+              --repo "${{ github.repository }}" \
+              --pattern "$ASSET" \
+              --dir /tmp/assets
+            if [ ! -f "/tmp/assets/$ASSET" ]; then
+              echo "ERROR: Asset $ASSET not found in release $TAG"
+              exit 1
+            fi
+            SHA=$(sha256sum /tmp/assets/$ASSET | awk '{print $1}')
+            echo "sha256_${TARGET//-/_}=$SHA" >> $GITHUB_OUTPUT
+            echo "$TARGET -> $SHA"
+          done
+
+      - name: Checkout tap repo
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          repository: eqms/homebrew-ai-workbench
+          ssh-key: ${{ secrets.TAP_DEPLOY_KEY }}
+          path: tap
+
+      - name: Rewrite formula
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          VERSION="${TAG#v}"
+          FORMULA="tap/Formula/ai-workbench.rb"
+
+          # Verify all four sha256 values are non-empty and 64 hex chars
+          SHA_AARCH64_DARWIN="${{ steps.hashes.outputs.sha256_aarch64_apple_darwin }}"
+          SHA_X86_64_DARWIN="${{ steps.hashes.outputs.sha256_x86_64_apple_darwin }}"
+          SHA_AARCH64_LINUX="${{ steps.hashes.outputs.sha256_aarch64_unknown_linux_gnu }}"
+          SHA_X86_64_LINUX="${{ steps.hashes.outputs.sha256_x86_64_unknown_linux_gnu }}"
+
+          for SHA in "$SHA_AARCH64_DARWIN" "$SHA_X86_64_DARWIN" "$SHA_AARCH64_LINUX" "$SHA_X86_64_LINUX"; do
+            if [ -z "$SHA" ] || [ ${#SHA} -ne 64 ]; then
+              echo "ERROR: Invalid SHA256 value: '$SHA'"
+              exit 1
+            fi
+          done
+
+          # Replace version in all 4 download URLs
+          sed -i "s|/releases/download/v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*/|/releases/download/${TAG}/|g" "$FORMULA"
+
+          # Replace each sha256 by binding it to the target named in the *preceding*
+          # url line, not by line position. This survives reordering of the formula
+          # blocks and refuses to corrupt the file if a target's url goes missing
+          # (the END block fails the job if any of the 4 targets was not matched).
+          # Uses only portable awk features (index/sub, no gawk match() captures or
+          # {n} interval expressions) so it runs identically on mawk/gawk/BSD awk.
+          awk -v s_ad="$SHA_AARCH64_DARWIN" \
+              -v s_xd="$SHA_X86_64_DARWIN" \
+              -v s_al="$SHA_AARCH64_LINUX" \
+              -v s_xl="$SHA_X86_64_LINUX" \
+              'BEGIN {
+                 sha["aarch64-apple-darwin"]      = s_ad
+                 sha["x86_64-apple-darwin"]       = s_xd
+                 sha["aarch64-unknown-linux-gnu"] = s_al
+                 sha["x86_64-unknown-linux-gnu"]  = s_xl
+                 pending = ""
+               }
+               {
+                 line = $0
+                 if (line ~ /url "/) {
+                   pending = ""
+                   for (t in sha) {
+                     if (index(line, "ai-workbench-" t ".tar.gz") > 0) { pending = t; break }
+                   }
+                 } else if (line ~ /sha256 "/ && pending != "") {
+                   if (pending in sha) {
+                     sub(/"[a-f0-9]+"/, "\"" sha[pending] "\"", line)
+                     seen[pending] = 1
+                   }
+                   pending = ""
+                 }
+                 print line
+               }
+               END {
+                 missing = 0
+                 for (t in sha) if (!(t in seen)) {
+                   print "ERROR: SHA for target " t " not found/replaced in formula" > "/dev/stderr"
+                   missing = 1
+                 }
+                 if (missing) exit 1
+               }' "$FORMULA" > "$FORMULA.tmp" && mv "$FORMULA.tmp" "$FORMULA"
+
+          echo "Formula after update:"
+          cat "$FORMULA"
+
+          # Sanity check: exactly 4 sha256 lines and 4 url lines on the new tag
+          SHA_COUNT=$(grep -c 'sha256 "' "$FORMULA")
+          if [ "$SHA_COUNT" -ne 4 ]; then
+            echo "ERROR: Expected 4 sha256 lines, found $SHA_COUNT"
+            exit 1
+          fi
+          URL_COUNT=$(grep -c "releases/download/${TAG}/" "$FORMULA")
+          if [ "$URL_COUNT" -ne 4 ]; then
+            echo "ERROR: Expected 4 download URLs on ${TAG}, found $URL_COUNT"
+            exit 1
+          fi
+
+      - name: Commit and push formula
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/ai-workbench.rb
+          if git diff --cached --quiet; then
+            echo "No changes to formula — already up to date for $TAG"
+            exit 0
+          fi
+          git commit -m "[CHG] Update to ${TAG}"
+          git push
+          echo "Formula updated and pushed for $TAG"

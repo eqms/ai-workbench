@@ -1,0 +1,837 @@
+use crate::git;
+use crate::types::{GitFileStatus, GitRepoInfo};
+use ratatui::{
+    prelude::Rect,
+    style::{Color, Modifier, Style},
+    widgets::{
+        Block, BorderType, List, ListItem, ListState, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
+    },
+    Frame,
+};
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::PathBuf;
+use std::time::SystemTime;
+
+/// Format file modification date for display using local timezone.
+/// Validates timestamp range to avoid undefined behavior in libc calls.
+fn format_file_date(utc_secs: u64) -> String {
+    // Validate timestamp range to prevent UB in localtime_r/localtime_s.
+    // Max safe value: 2038-01-19 on 32-bit, but we cap at year 9999 for sanity.
+    const MAX_SAFE_TIMESTAMP: u64 = 253_402_300_799; // 9999-12-31 23:59:59 UTC
+    if utc_secs > MAX_SAFE_TIMESTAMP {
+        return "??. ??.???? ??:??".to_string();
+    }
+
+    let time_t = utc_secs as libc::time_t;
+
+    // On 32-bit platforms, time_t is i32 and overflows after 2038-01-19
+    #[cfg(target_pointer_width = "32")]
+    if utc_secs > i32::MAX as u64 {
+        return "??. ??.???? ??:??".to_string();
+    }
+
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+
+    // Platform-specific timezone conversion
+    #[cfg(unix)]
+    let ok = unsafe { !libc::localtime_r(&time_t, &mut tm).is_null() };
+
+    #[cfg(windows)]
+    let ok = unsafe { libc::localtime_s(&mut tm, &time_t) == 0 };
+
+    if !ok {
+        return "??. ??.???? ??:??".to_string();
+    }
+
+    // tm_year is years since 1900, tm_mon is 0-11
+    let year = tm.tm_year + 1900;
+    let month = tm.tm_mon + 1;
+    let day = tm.tm_mday;
+    let hours = tm.tm_hour;
+    let minutes = tm.tm_min;
+
+    format!(
+        "{:02}.{:02}.{} {:02}:{:02}",
+        day, month, year, hours, minutes
+    )
+}
+
+#[derive(Debug, Clone)]
+pub struct FileEntry {
+    pub path: PathBuf,
+    pub name: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub modified: Option<SystemTime>,
+    pub git_status: GitFileStatus,
+    pub depth: usize,
+    pub expanded: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct FileBrowserState {
+    pub current_dir: PathBuf,
+    pub root_dir: PathBuf,
+    pub entries: Vec<FileEntry>,
+    pub list_state: ListState,
+    pub repo_root: Option<PathBuf>,
+    pub git_info: Option<GitRepoInfo>,
+    git_statuses: HashMap<PathBuf, GitFileStatus>,
+    pub show_hidden: bool,
+    pub expanded_dirs: HashSet<PathBuf>,
+    /// Previous directory for F7 toggle (back from ~/.claude)
+    pub previous_dir: Option<PathBuf>,
+}
+
+impl FileBrowserState {
+    pub fn new(show_hidden: bool) -> Self {
+        let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let root_dir = current_dir.clone();
+        let repo_root = git::find_repo_root(&current_dir);
+        let mut s = Self {
+            current_dir,
+            root_dir: root_dir.clone(),
+            entries: Vec::new(),
+            list_state: ListState::default(),
+            repo_root,
+            git_info: None,
+            git_statuses: HashMap::new(),
+            show_hidden,
+            expanded_dirs: HashSet::new(),
+            previous_dir: None,
+        };
+        // Start with root expanded
+        s.expanded_dirs.insert(root_dir);
+        s.load_tree();
+        s
+    }
+
+    /// Build the flat entry list from the tree structure
+    pub fn load_tree(&mut self) {
+        self.entries.clear();
+        self.list_state.select(None);
+
+        // Update repo root and git status from root_dir
+        self.repo_root = git::find_repo_root(&self.root_dir);
+        let (statuses, git_info) = git::get_status_for_directory(&self.root_dir);
+        self.git_statuses = statuses;
+        self.git_info = git_info;
+
+        // Add ".." entry if root has a parent directory
+        if self.root_dir.parent().is_some() {
+            self.entries.push(FileEntry {
+                path: self.root_dir.clone(), // Special marker - path points to current root
+                name: "..".to_string(),
+                is_dir: true,
+                size: 0,
+                modified: None,
+                git_status: GitFileStatus::Clean,
+                depth: 0,
+                expanded: false,
+            });
+        }
+
+        // Build tree recursively from root
+        self.build_tree_recursive(&self.root_dir.clone(), 0, false);
+
+        if !self.entries.is_empty() {
+            self.list_state.select(Some(0));
+        }
+    }
+
+    /// Recursively build the flat list from directory tree
+    /// When parent_ignored is true, all children inherit GitFileStatus::Ignored
+    fn build_tree_recursive(&mut self, dir: &PathBuf, depth: usize, parent_ignored: bool) {
+        let is_expanded = self.expanded_dirs.contains(dir);
+
+        if let Ok(read_entries) = fs::read_dir(dir) {
+            let mut children: Vec<(PathBuf, String, bool)> = Vec::new();
+
+            for entry in read_entries.flatten() {
+                let path = entry.path();
+                let is_dir = path.is_dir();
+                let name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+
+                // Filter hidden files
+                if !self.show_hidden && name.starts_with('.') {
+                    continue;
+                }
+
+                children.push((path, name, is_dir));
+            }
+
+            // Sort: directories first, then alphabetically
+            children.sort_by(|a, b| {
+                if a.2 == b.2 {
+                    a.1.to_lowercase().cmp(&b.1.to_lowercase())
+                } else if a.2 {
+                    std::cmp::Ordering::Less
+                } else {
+                    std::cmp::Ordering::Greater
+                }
+            });
+
+            for (path, name, is_dir) in children {
+                let metadata = fs::metadata(&path).ok();
+                let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                let modified = metadata.and_then(|m| m.modified().ok());
+
+                let git_status = if parent_ignored {
+                    GitFileStatus::Ignored
+                } else if is_dir {
+                    // Check if this directory itself is ignored
+                    let dir_status = self.git_statuses.get(&path).copied();
+                    if dir_status == Some(GitFileStatus::Ignored) {
+                        GitFileStatus::Ignored
+                    } else {
+                        git::aggregate_directory_status(&path, &self.git_statuses)
+                    }
+                } else {
+                    self.git_statuses
+                        .get(&path)
+                        .copied()
+                        .unwrap_or(GitFileStatus::Clean)
+                };
+
+                let expanded = is_dir && self.expanded_dirs.contains(&path);
+
+                self.entries.push(FileEntry {
+                    path: path.clone(),
+                    name,
+                    is_dir,
+                    size,
+                    modified,
+                    git_status,
+                    depth,
+                    expanded,
+                });
+
+                // If directory is expanded, recurse into it
+                // Propagate ignored status to children
+                if is_dir && is_expanded && expanded {
+                    let child_ignored = parent_ignored || git_status == GitFileStatus::Ignored;
+                    self.build_tree_recursive(&path, depth + 1, child_ignored);
+                }
+            }
+        }
+    }
+
+    pub fn up(&mut self) {
+        let i = match self.list_state.selected() {
+            Some(i) => {
+                if i == 0 {
+                    0
+                } else {
+                    i - 1
+                }
+            }
+            None => 0,
+        };
+        self.list_state.select(Some(i));
+    }
+
+    pub fn down(&mut self) {
+        let i = match self.list_state.selected() {
+            Some(i) => {
+                if i >= self.entries.len().saturating_sub(1) {
+                    self.entries.len().saturating_sub(1)
+                } else {
+                    i + 1
+                }
+            }
+            None => 0,
+        };
+        self.list_state.select(Some(i));
+    }
+
+    /// Toggle expand/collapse for directories, return file path for files
+    pub fn enter_selected(&mut self) -> Option<PathBuf> {
+        if let Some(i) = self.list_state.selected() {
+            if let Some(entry) = self.entries.get(i).cloned() {
+                // Special handling for ".." entry - navigate to parent
+                if entry.name == ".." {
+                    self.navigate_root_up();
+                    return None;
+                }
+
+                if entry.is_dir {
+                    self.toggle_expand(&entry.path);
+                    // Update current_dir to the selected directory
+                    self.current_dir = entry.path;
+                    return None;
+                } else {
+                    return Some(entry.path);
+                }
+            }
+        }
+        None
+    }
+
+    /// Toggle a directory's expanded state and rebuild the tree
+    fn toggle_expand(&mut self, path: &PathBuf) {
+        if self.expanded_dirs.contains(path) {
+            self.expanded_dirs.remove(path);
+        } else {
+            self.expanded_dirs.insert(path.clone());
+        }
+        self.rebuild_tree();
+    }
+
+    /// Collapse current directory or navigate to parent
+    ///
+    /// Behavior:
+    /// 1. If selected is ".." entry → navigate root_dir up one level
+    /// 2. If selected is an expanded directory → collapse it
+    /// 3. If parent is above root_dir → navigate root_dir up one level
+    /// 4. If parent exists in entries → select it
+    /// 5. Fallback → navigate root_dir up one level
+    pub fn go_parent(&mut self) {
+        let Some(i) = self.list_state.selected() else {
+            return;
+        };
+        let Some(entry) = self.entries.get(i).cloned() else {
+            return;
+        };
+
+        // Case 1: If ".." entry is selected, navigate up
+        if entry.name == ".." {
+            self.navigate_root_up();
+            return;
+        }
+
+        // Case 2: Collapse expanded directory
+        if entry.is_dir && self.expanded_dirs.contains(&entry.path) {
+            self.expanded_dirs.remove(&entry.path);
+            self.rebuild_tree();
+            return;
+        }
+
+        // Get parent path
+        let Some(parent_path) = entry.path.parent().map(|p| p.to_path_buf()) else {
+            return;
+        };
+
+        // Case 3: If we're at or below root_dir and parent would be root_dir,
+        // navigate the entire view up one level
+        if parent_path == self.root_dir || entry.path == self.root_dir {
+            self.navigate_root_up();
+            return;
+        }
+
+        // Case 4: Find parent in entries list and select it
+        if let Some(parent_idx) = self
+            .entries
+            .iter()
+            .position(|e| e.path == parent_path && e.is_dir)
+        {
+            self.list_state.select(Some(parent_idx));
+            self.current_dir = parent_path;
+            return;
+        }
+
+        // Case 5: Parent not in list, navigate root up
+        self.navigate_root_up();
+    }
+
+    /// Navigate the root directory up one level
+    fn navigate_root_up(&mut self) {
+        if let Some(parent) = self.root_dir.parent() {
+            let old_root = self.root_dir.clone();
+            self.root_dir = parent.to_path_buf();
+            self.current_dir = self.root_dir.clone();
+            self.expanded_dirs.clear();
+            self.expanded_dirs.insert(self.root_dir.clone());
+            // Keep old root expanded so we can see where we came from
+            self.expanded_dirs.insert(old_root);
+            self.load_tree();
+        }
+    }
+
+    /// Return a reference to the currently selected entry, if any.
+    pub fn selected_entry(&self) -> Option<&FileEntry> {
+        self.list_state.selected().and_then(|i| self.entries.get(i))
+    }
+
+    /// Rebuild the flat list while preserving selection
+    fn rebuild_tree(&mut self) {
+        let selected_path = self
+            .list_state
+            .selected()
+            .and_then(|i| self.entries.get(i))
+            .map(|e| (e.path.clone(), e.name.clone()));
+
+        // Preserve scroll offset across rebuild — ratatui's ListState::select(None)
+        // hard-resets offset to 0, which causes a jarring viewport jump on every
+        // expand/collapse.  We restore it (clamped) after the tree is rebuilt.
+        let saved_offset = self.list_state.offset();
+
+        self.entries.clear();
+        self.list_state.select(None);
+
+        // Add ".." entry if root has a parent directory
+        if self.root_dir.parent().is_some() {
+            self.entries.push(FileEntry {
+                path: self.root_dir.clone(),
+                name: "..".to_string(),
+                is_dir: true,
+                size: 0,
+                modified: None,
+                git_status: GitFileStatus::Clean,
+                depth: 0,
+                expanded: false,
+            });
+        }
+
+        self.build_tree_recursive(&self.root_dir.clone(), 0, false);
+
+        // Restore selection by path and name (to distinguish ".." from regular entries)
+        if let Some((path, name)) = selected_path {
+            if let Some(idx) = self
+                .entries
+                .iter()
+                .position(|e| e.path == path && e.name == name)
+            {
+                self.list_state.select(Some(idx));
+            } else if !self.entries.is_empty() {
+                self.list_state.select(Some(0));
+            }
+        } else if !self.entries.is_empty() {
+            self.list_state.select(Some(0));
+        }
+
+        // Restore scroll offset, clamped to the new entry count.
+        // Collapse shrinks the list — without the clamp the offset would point
+        // past the end and the viewport would appear blank.
+        *self.list_state.offset_mut() = saved_offset.min(self.entries.len().saturating_sub(1));
+    }
+
+    pub fn selected_file(&self) -> Option<PathBuf> {
+        self.list_state
+            .selected()
+            .and_then(|i| self.entries.get(i).map(|e| e.path.clone()))
+    }
+
+    pub fn refresh(&mut self) {
+        let selected_path = self
+            .list_state
+            .selected()
+            .and_then(|i| self.entries.get(i))
+            .map(|e| e.path.clone());
+        // Preserve the scroll position across the rebuild. load_tree() calls
+        // list_state.select(None), and ratatui's ListState::select(None) hard-
+        // resets offset to 0. Without restoring it, the periodic auto-refresh
+        // (default 2s) would snap the viewport back to the top while the user
+        // is scrolling.
+        let saved_offset = self.list_state.offset();
+
+        // Preserve expanded_dirs across refresh
+        self.load_tree();
+
+        // Restore selection by path
+        if let Some(path) = selected_path {
+            if let Some(idx) = self.entries.iter().position(|e| e.path == path) {
+                self.list_state.select(Some(idx));
+            }
+        }
+
+        // Restore the scroll offset (load_tree reset it via select(None)),
+        // clamped against the possibly-changed entry count.
+        let max_offset = self.entries.len().saturating_sub(1);
+        *self.list_state.offset_mut() = saved_offset.min(max_offset);
+    }
+
+    /// Legacy compatibility: load_directory calls load_tree
+    pub fn load_directory(&mut self) {
+        // When current_dir changes externally, reset tree to that dir
+        self.root_dir = self.current_dir.clone();
+        self.expanded_dirs.clear();
+        self.expanded_dirs.insert(self.root_dir.clone());
+        self.load_tree();
+    }
+}
+
+/// Get style for git status
+fn style_for_git_status(status: GitFileStatus) -> Style {
+    match status {
+        GitFileStatus::Untracked => Style::default().fg(Color::Yellow),
+        GitFileStatus::Modified => Style::default().fg(Color::Rgb(255, 165, 0)), // Orange
+        GitFileStatus::Staged => Style::default().fg(Color::Green),
+        GitFileStatus::Ignored => Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::DIM),
+        GitFileStatus::Conflict => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        GitFileStatus::Clean | GitFileStatus::Unknown => Style::default(),
+    }
+}
+
+pub fn render(f: &mut Frame, area: Rect, state: &mut FileBrowserState, is_focused: bool) {
+    use ratatui::layout::{Constraint, Direction, Layout};
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::Paragraph;
+
+    // Clear area before rendering to prevent stale content from previous frames
+    if area.width > 0 && area.height > 0 {
+        f.render_widget(ratatui::widgets::Clear, area);
+    }
+
+    // Split area: list + info bar
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .split(area);
+
+    let list_area = chunks[0];
+    let info_area = chunks[1];
+
+    let items: Vec<ListItem> = state
+        .entries
+        .iter()
+        .map(|entry| {
+            // Tree indentation
+            let indent = "    ".repeat(entry.depth);
+
+            // Tree icon: special icon for "..", expanded/collapsed for dirs, file icon for files
+            let tree_icon = if entry.name == ".." {
+                "↑ 📁 " // Special icon for parent directory navigation
+            } else if entry.is_dir {
+                if entry.expanded {
+                    "▼ 📁 "
+                } else {
+                    "▶ 📁 "
+                }
+            } else {
+                "  📄 "
+            };
+
+            // Get git status symbol and style
+            let status_symbol = entry.git_status.symbol();
+            let status_style = style_for_git_status(entry.git_status);
+
+            // Build the line with indent, tree icon, and name
+            let line = Line::from(vec![
+                Span::styled(status_symbol, status_style),
+                Span::raw(" "),
+                Span::raw(indent),
+                Span::styled(format!("{}{}", tree_icon, entry.name), status_style),
+            ]);
+
+            ListItem::new(line)
+        })
+        .collect();
+
+    let (border_style, border_type) = if is_focused {
+        (Style::default().fg(Color::Green), BorderType::Double)
+    } else {
+        (Style::default(), BorderType::Rounded)
+    };
+
+    let title = format!(" {} ", state.root_dir.display());
+    let block = Block::bordered()
+        .title(title)
+        .border_style(border_style)
+        .border_type(border_type);
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    f.render_stateful_widget(list, list_area, &mut state.list_state);
+
+    // Scrollbar
+    let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(Some("▲"))
+        .end_symbol(Some("▼"));
+
+    let mut scrollbar_state =
+        ScrollbarState::new(state.entries.len()).position(state.list_state.selected().unwrap_or(0));
+
+    // Render scrollbar in the inner area (inside the border)
+    let scrollbar_area = Rect {
+        x: list_area.x,
+        y: list_area.y,
+        width: list_area.width,
+        height: list_area.height.saturating_sub(1), // Account for border
+    };
+    f.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
+
+    // File info bar with git branch info
+    let git_info_str = if let Some(ref git_info) = state.git_info {
+        let mut parts = vec![format!("🌿 {}", git_info.branch)];
+        if git_info.modified_count > 0 {
+            parts.push(format!("M:{}", git_info.modified_count));
+        }
+        if git_info.untracked_count > 0 {
+            parts.push(format!("?:{}", git_info.untracked_count));
+        }
+        if git_info.staged_count > 0 {
+            parts.push(format!("+:{}", git_info.staged_count));
+        }
+        parts.join(" ")
+    } else {
+        String::new()
+    };
+
+    let file_info_text = if let Some(idx) = state.list_state.selected() {
+        if let Some(entry) = state.entries.get(idx) {
+            if entry.is_dir {
+                " 📁 Dir".to_string()
+            } else {
+                let size_kb = entry.size as f64 / 1024.0;
+                let date_str = entry
+                    .modified
+                    .and_then(|m| m.duration_since(SystemTime::UNIX_EPOCH).ok())
+                    .map(|d| format_file_date(d.as_secs()))
+                    .unwrap_or_default();
+                if date_str.is_empty() {
+                    format!(" 📄 {:.1}K", size_kb)
+                } else {
+                    format!(" 📄 {:.1}K │ {}", size_kb, date_str)
+                }
+            }
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    // Combine file info and git info
+    let info_text = if git_info_str.is_empty() {
+        file_info_text
+    } else {
+        format!("{} │ {}", file_info_text, git_info_str)
+    };
+
+    let info = Paragraph::new(info_text).style(Style::default().fg(Color::DarkGray));
+    f.render_widget(info, info_area);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    /// Build a FileBrowserState rooted at `dir` containing `n` flat files.
+    fn browser_with_files(dir: &std::path::Path, n: usize) -> FileBrowserState {
+        for i in 0..n {
+            fs::write(dir.join(format!("file_{i:03}.txt")), "x").unwrap();
+        }
+        let mut s = FileBrowserState::new(false);
+        s.root_dir = dir.to_path_buf();
+        s.current_dir = dir.to_path_buf();
+        s.expanded_dirs.clear();
+        s.expanded_dirs.insert(dir.to_path_buf());
+        s.load_tree();
+        s
+    }
+
+    #[test]
+    fn refresh_preserves_scroll_offset_and_selection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut fb = browser_with_files(tmp.path(), 50);
+        assert!(
+            fb.entries.len() >= 50,
+            "expected >=50 entries, got {}",
+            fb.entries.len()
+        );
+
+        // Simulate a scrolled + selected viewport. select(Some(_)) does not
+        // touch offset, so setting offset afterwards is safe either way.
+        fb.list_state.select(Some(25));
+        *fb.list_state.offset_mut() = 20;
+        let selected_path = fb.entries[25].path.clone();
+
+        fb.refresh();
+
+        assert_eq!(
+            fb.list_state.offset(),
+            20,
+            "refresh must preserve the scroll offset (auto-refresh regression)"
+        );
+        let restored = fb
+            .list_state
+            .selected()
+            .and_then(|i| fb.entries.get(i))
+            .map(|e| e.path.clone());
+        assert_eq!(
+            restored,
+            Some(selected_path),
+            "refresh must preserve selection by path"
+        );
+    }
+
+    #[test]
+    fn refresh_clamps_offset_when_entries_shrink() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut fb = browser_with_files(tmp.path(), 30);
+        fb.list_state.select(Some(0));
+        *fb.list_state.offset_mut() = 25;
+
+        // Remove most files so the entry count drops well below saved offset.
+        for i in 5..30 {
+            let _ = fs::remove_file(tmp.path().join(format!("file_{i:03}.txt")));
+        }
+        fb.refresh();
+
+        let max_offset = fb.entries.len().saturating_sub(1);
+        assert!(
+            fb.list_state.offset() <= max_offset,
+            "offset {} must be clamped to <= {}",
+            fb.list_state.offset(),
+            max_offset
+        );
+    }
+
+    // --- rebuild_tree scroll-offset tests ---
+
+    /// Helper: create a temp dir with `n` subdirectories and `m` files.
+    fn browser_with_subdirs(
+        dir: &std::path::Path,
+        n_dirs: usize,
+        n_files: usize,
+    ) -> FileBrowserState {
+        for i in 0..n_dirs {
+            fs::create_dir_all(dir.join(format!("subdir_{i:03}"))).unwrap();
+        }
+        for i in 0..n_files {
+            fs::write(dir.join(format!("file_{i:03}.txt")), "x").unwrap();
+        }
+        let mut s = FileBrowserState::new(false);
+        s.root_dir = dir.to_path_buf();
+        s.current_dir = dir.to_path_buf();
+        s.expanded_dirs.clear();
+        s.expanded_dirs.insert(dir.to_path_buf());
+        s.load_tree();
+        s
+    }
+
+    #[test]
+    fn rebuild_tree_preserves_scroll_offset_on_expand() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Create 10 subdirs + 20 files so the list is long enough to scroll.
+        let mut fb = browser_with_subdirs(tmp.path(), 10, 20);
+        assert!(
+            fb.entries.len() >= 30,
+            "need >=30 entries for this test, got {}",
+            fb.entries.len()
+        );
+
+        // Scroll viewport to offset 10, select entry 15.
+        fb.list_state.select(Some(15));
+        *fb.list_state.offset_mut() = 10;
+
+        // Expand subdir_000 (first directory entry after "..")
+        let dir_entry = fb
+            .entries
+            .iter()
+            .find(|e| e.is_dir && e.name != "..")
+            .cloned()
+            .expect("need at least one subdirectory");
+        // Expand via toggle_expand (private) — drive it through enter_selected after
+        // selecting the dir entry index.
+        let dir_idx = fb
+            .entries
+            .iter()
+            .position(|e| e.path == dir_entry.path)
+            .unwrap();
+        fb.list_state.select(Some(dir_idx));
+        *fb.list_state.offset_mut() = 10; // re-set offset after select
+        fb.enter_selected(); // triggers toggle_expand → rebuild_tree
+
+        assert_eq!(
+            fb.list_state.offset(),
+            10,
+            "scroll offset must be preserved after expand (got {})",
+            fb.list_state.offset()
+        );
+    }
+
+    #[test]
+    fn rebuild_tree_clamps_scroll_offset_on_collapse() {
+        let tmp = tempfile::tempdir().unwrap();
+        // One subdir with several files inside, plus some root-level files.
+        let sub = tmp.path().join("subdir_000");
+        fs::create_dir_all(&sub).unwrap();
+        for i in 0..30 {
+            fs::write(sub.join(format!("inner_{i:03}.txt")), "x").unwrap();
+        }
+        for i in 0..5 {
+            fs::write(tmp.path().join(format!("root_{i:03}.txt")), "x").unwrap();
+        }
+
+        let mut fb = FileBrowserState::new(false);
+        fb.root_dir = tmp.path().to_path_buf();
+        fb.current_dir = tmp.path().to_path_buf();
+        fb.expanded_dirs.clear();
+        fb.expanded_dirs.insert(tmp.path().to_path_buf());
+        fb.expanded_dirs.insert(sub.clone());
+        fb.load_tree();
+
+        // List should now be long (30 inner files visible).
+        assert!(
+            fb.entries.len() > 10,
+            "need >10 entries after expand, got {}",
+            fb.entries.len()
+        );
+
+        // Set offset to near the end of the expanded list.
+        let high_offset = fb.entries.len() - 2;
+        *fb.list_state.offset_mut() = high_offset;
+
+        // Collapse subdir_000 — this makes the list much shorter.
+        let dir_idx = fb
+            .entries
+            .iter()
+            .position(|e| e.path == sub && e.is_dir)
+            .unwrap();
+        fb.list_state.select(Some(dir_idx));
+        fb.enter_selected(); // collapse triggers rebuild_tree
+
+        let max_offset = fb.entries.len().saturating_sub(1);
+        assert!(
+            fb.list_state.offset() <= max_offset,
+            "offset {} must be clamped to <= {} after collapse",
+            fb.list_state.offset(),
+            max_offset
+        );
+    }
+
+    #[test]
+    fn rebuild_tree_preserves_scroll_offset_middle_of_list() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Enough entries so offset=5 is in the "middle".
+        let mut fb = browser_with_subdirs(tmp.path(), 3, 20);
+        assert!(
+            fb.entries.len() >= 10,
+            "need >=10 entries, got {}",
+            fb.entries.len()
+        );
+
+        *fb.list_state.offset_mut() = 5;
+        fb.list_state.select(Some(7));
+
+        // Expand first dir to trigger rebuild_tree.
+        let dir_idx = fb
+            .entries
+            .iter()
+            .position(|e| e.is_dir && e.name != "..")
+            .unwrap();
+        fb.list_state.select(Some(dir_idx));
+        *fb.list_state.offset_mut() = 5; // restore after select
+        fb.enter_selected();
+
+        // Offset 5 is within any reasonable list of 10+ entries.
+        assert_eq!(
+            fb.list_state.offset(),
+            5,
+            "offset must stay at 5 after expand in middle of list (got {})",
+            fb.list_state.offset()
+        );
+    }
+}

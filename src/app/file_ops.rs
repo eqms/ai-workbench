@@ -1,0 +1,1068 @@
+use crossterm::event::{KeyCode, KeyModifiers};
+
+use crate::ui;
+
+use super::App;
+
+impl App {
+    pub(super) fn handle_menu_action(&mut self, action: ui::menu::MenuAction) {
+        use ui::dialog::{DialogAction, DialogType};
+        use ui::menu::MenuAction;
+
+        match action {
+            MenuAction::NewFile => {
+                self.dialog.dialog_type = DialogType::Input {
+                    title: "New File".to_string(),
+                    value: String::new(),
+                    cursor: 0,
+                    action: DialogAction::NewFile,
+                };
+            }
+            MenuAction::NewDirectory => {
+                self.dialog.dialog_type = DialogType::Input {
+                    title: "New Directory".to_string(),
+                    value: String::new(),
+                    cursor: 0,
+                    action: DialogAction::NewDirectory,
+                };
+            }
+            MenuAction::RenameFile => {
+                if let Some(selected) = self.file_browser.selected_file() {
+                    let name = selected
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    let cursor_pos = name.chars().count();
+                    self.dialog.dialog_type = DialogType::Input {
+                        title: "Rename".to_string(),
+                        value: name,
+                        cursor: cursor_pos,
+                        action: DialogAction::RenameFile { old_path: selected },
+                    };
+                }
+            }
+            MenuAction::DuplicateFile => {
+                if let Some(selected) = self.file_browser.selected_file() {
+                    if selected.is_file() {
+                        // Generate duplicate name with counter
+                        let parent = selected.parent().unwrap_or(&self.file_browser.current_dir);
+                        let stem = selected
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        let ext = selected
+                            .extension()
+                            .map(|e| format!(".{}", e.to_string_lossy()))
+                            .unwrap_or_default();
+
+                        let mut counter = 1;
+                        let mut new_path;
+                        loop {
+                            let new_name = format!("{} - Duplikat {}{}", stem, counter, ext);
+                            new_path = parent.join(&new_name);
+                            if !new_path.exists() {
+                                break;
+                            }
+                            counter += 1;
+                        }
+
+                        if let Err(e) = std::fs::copy(&selected, &new_path) {
+                            eprintln!("Failed to duplicate file: {}", e);
+                        } else {
+                            self.file_browser.refresh();
+                            self.update_preview();
+                        }
+                    }
+                }
+            }
+            MenuAction::CopyFileTo => {
+                if let Some(selected) = self.file_browser.selected_file() {
+                    if selected.is_file() {
+                        let dir_str = self.file_browser.current_dir.to_string_lossy().to_string();
+                        let cursor_pos = dir_str.chars().count();
+                        self.dialog.dialog_type = DialogType::Input {
+                            title: "Copy to".to_string(),
+                            value: dir_str,
+                            cursor: cursor_pos,
+                            action: DialogAction::CopyFileTo { source: selected },
+                        };
+                    }
+                }
+            }
+            MenuAction::MoveFileTo => {
+                if let Some(selected) = self.file_browser.selected_file() {
+                    if selected.is_file() {
+                        let dir_str = self.file_browser.current_dir.to_string_lossy().to_string();
+                        let cursor_pos = dir_str.chars().count();
+                        self.dialog.dialog_type = DialogType::Input {
+                            title: "Move to".to_string(),
+                            value: dir_str,
+                            cursor: cursor_pos,
+                            action: DialogAction::MoveFileTo { source: selected },
+                        };
+                    }
+                }
+            }
+            MenuAction::DeleteFile => {
+                if let Some(selected) = self.file_browser.selected_file() {
+                    if selected.file_name().map(|n| n.to_string_lossy()) != Some("..".into()) {
+                        let name = selected
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_default();
+                        self.dialog.dialog_type = DialogType::Confirm {
+                            title: "Delete".to_string(),
+                            message: format!("Delete '{}'?", name),
+                            action: DialogAction::DeleteFile { path: selected },
+                        };
+                    }
+                }
+            }
+            MenuAction::CopyAbsolutePath => {
+                if let Some(selected) = self.file_browser.selected_file() {
+                    let path = selected.to_string_lossy().to_string();
+                    crate::clipboard::copy_to_clipboard(&path);
+                }
+            }
+            MenuAction::CopyRelativePath => {
+                if let Some(selected) = self.file_browser.selected_file() {
+                    if let Ok(rel) = selected.strip_prefix(&self.file_browser.current_dir) {
+                        let path = rel.to_string_lossy().to_string();
+                        crate::clipboard::copy_to_clipboard(&path);
+                    }
+                }
+            }
+            MenuAction::GoToPath => {
+                let dir_str = self.file_browser.current_dir.to_string_lossy().to_string();
+                let cursor_pos = dir_str.chars().count();
+                self.dialog.dialog_type = ui::dialog::DialogType::Input {
+                    title: "Go to Path".to_string(),
+                    value: dir_str,
+                    cursor: cursor_pos,
+                    action: ui::dialog::DialogAction::GoToPath,
+                };
+            }
+            MenuAction::AddToGitignore => {
+                if let Some(path) = self.file_browser.selected_file() {
+                    self.add_to_gitignore(&path);
+                }
+            }
+            MenuAction::ExportFile => {
+                if let Some(path) = &self.preview.current_file {
+                    if self.preview.is_markdown {
+                        self.export_chooser = crate::types::ExportChooserState {
+                            visible: true,
+                            source_path: path.clone(),
+                            selected: 0,
+                            is_batch: false,
+                        };
+                    }
+                }
+            }
+            MenuAction::None => {}
+        }
+    }
+
+    /// Check if a filename is safe (no path traversal).
+    /// Uses char-level checks for proper Unicode handling.
+    pub(super) fn is_safe_filename(name: &str) -> bool {
+        !name.contains("..")
+            && !name.starts_with('/')
+            && !name.starts_with('\\')
+            && !name.contains('\0')
+            && !name.chars().any(|c| c == '/' || c == '\\')
+    }
+
+    /// Validate that a destination path is safe for file operations.
+    /// Ensures the resolved path is a real directory and prevents traversal tricks.
+    pub(super) fn is_safe_destination(dest: &str) -> bool {
+        let path = std::path::Path::new(dest);
+        // Path must exist and be a directory
+        if !path.is_dir() {
+            return false;
+        }
+        // Canonicalize to resolve symlinks and .. components
+        // If canonicalize fails, the path is suspicious
+        path.canonicalize().is_ok()
+    }
+
+    pub(super) fn execute_dialog_action(
+        &mut self,
+        action: ui::dialog::DialogAction,
+        value: Option<String>,
+    ) {
+        use ui::dialog::DialogAction;
+
+        match action {
+            DialogAction::NewFile => {
+                if let Some(name) = value {
+                    if !name.is_empty() && Self::is_safe_filename(&name) {
+                        let new_path = self.file_browser.current_dir.join(&name);
+                        if let Err(e) = std::fs::write(&new_path, "") {
+                            self.set_clipboard_error_flash(format!("Create failed: {}", e));
+                        }
+                        self.file_browser.refresh();
+                    }
+                }
+            }
+            DialogAction::NewDirectory => {
+                if let Some(name) = value {
+                    if !name.is_empty() && Self::is_safe_filename(&name) {
+                        let new_path = self.file_browser.current_dir.join(&name);
+                        if let Err(e) = std::fs::create_dir(&new_path) {
+                            eprintln!("Failed to create directory: {}", e);
+                        } else {
+                            self.file_browser.refresh();
+                        }
+                    }
+                }
+            }
+            DialogAction::RenameFile { old_path } => {
+                if let Some(new_name) = value {
+                    if !new_name.is_empty() && Self::is_safe_filename(&new_name) {
+                        let new_path = old_path
+                            .parent()
+                            .map(|p| p.join(&new_name))
+                            .unwrap_or_else(|| std::path::PathBuf::from(&new_name));
+                        if let Err(e) = std::fs::rename(&old_path, &new_path) {
+                            self.set_clipboard_error_flash(format!("Rename failed: {}", e));
+                        }
+                        self.file_browser.refresh();
+                    }
+                }
+            }
+            DialogAction::DeleteFile { path } => {
+                let result = if path.is_file() {
+                    std::fs::remove_file(&path)
+                } else if path.is_dir() {
+                    std::fs::remove_dir_all(&path)
+                } else {
+                    Ok(())
+                };
+                if let Err(e) = result {
+                    self.set_clipboard_error_flash(format!("Delete failed: {}", e));
+                }
+                self.file_browser.refresh();
+            }
+            DialogAction::CopyFileTo { source } => {
+                if let Some(dest_dir) = value {
+                    if !dest_dir.is_empty() && Self::is_safe_destination(&dest_dir) {
+                        let dest_path = std::path::Path::new(&dest_dir)
+                            .canonicalize()
+                            .unwrap_or_default();
+                        if let Some(filename) = source.file_name() {
+                            let target = dest_path.join(filename);
+                            if let Err(e) = std::fs::copy(&source, &target) {
+                                eprintln!("Failed to copy file: {}", e);
+                            } else {
+                                self.file_browser.refresh();
+                            }
+                        }
+                    }
+                }
+            }
+            DialogAction::MoveFileTo { source } => {
+                if let Some(dest_dir) = value {
+                    if !dest_dir.is_empty() && Self::is_safe_destination(&dest_dir) {
+                        let dest_path = std::path::Path::new(&dest_dir)
+                            .canonicalize()
+                            .unwrap_or_default();
+                        if let Some(filename) = source.file_name() {
+                            let target = dest_path.join(filename);
+                            if let Err(e) = std::fs::rename(&source, &target) {
+                                eprintln!("Failed to move file: {}", e);
+                            } else {
+                                self.file_browser.refresh();
+                            }
+                        }
+                    }
+                }
+            }
+            DialogAction::DiscardEditorChanges => {
+                self.preview.exit_edit_mode(true); // true = discard changes
+                self.preview.refresh_highlighting(&self.syntax_manager);
+            }
+            DialogAction::SwitchFile { target_idx } => {
+                // Discard changes and switch to clicked file
+                self.preview.exit_edit_mode(true);
+                self.preview.refresh_highlighting(&self.syntax_manager);
+                self.file_browser.list_state.select(Some(target_idx));
+                self.update_preview();
+            }
+            DialogAction::EnterDirectory { target_idx } => {
+                // Discard changes and enter the clicked directory
+                self.preview.exit_edit_mode(true);
+                self.preview.refresh_highlighting(&self.syntax_manager);
+                self.file_browser.list_state.select(Some(target_idx));
+                self.file_browser.enter_selected();
+                self.update_preview();
+                self.sync_terminals();
+                self.check_repo_change();
+            }
+            DialogAction::GitPull { repo_root } => {
+                // Execute git pull
+                match crate::git::pull(&repo_root) {
+                    Ok(output) => {
+                        // Show success dialog with first 2 lines of output
+                        let summary: String = output.lines().take(2).collect::<Vec<_>>().join("\n");
+                        self.dialog.dialog_type = ui::dialog::DialogType::Confirm {
+                            title: "Git Pull".to_string(),
+                            message: format!("✓ Pull successful!\n{}", summary),
+                            action: DialogAction::GoToPath, // Dummy action - just closes on confirm
+                        };
+                        // Refresh file browser to show any new/changed files
+                        self.file_browser.refresh();
+                    }
+                    Err(err) => {
+                        // Show error dialog
+                        self.dialog.dialog_type = ui::dialog::DialogType::Confirm {
+                            title: "Git Pull Error".to_string(),
+                            message: format!("✗ Pull failed:\n{}", err),
+                            action: DialogAction::GoToPath, // Dummy action - just closes on confirm
+                        };
+                    }
+                }
+            }
+            DialogAction::CopyLastLines => {
+                if let Some(count_str) = value {
+                    if let Ok(count) = count_str.trim().parse::<usize>() {
+                        if count > 0 {
+                            self.copy_last_lines_to_clipboard_n(count);
+                        }
+                    }
+                }
+            }
+            DialogAction::GoToPath => {
+                if let Some(path_str) = value {
+                    if !path_str.is_empty() {
+                        let target = std::path::Path::new(&path_str);
+                        if target.is_dir() {
+                            self.file_browser.current_dir = target.to_path_buf();
+                            self.file_browser.load_directory();
+                            self.update_preview();
+                            self.sync_terminals();
+                            self.check_repo_change();
+                        } else if target.is_file() {
+                            if let Some(parent) = target.parent() {
+                                self.file_browser.current_dir = parent.to_path_buf();
+                                self.file_browser.load_directory();
+                                // Select the file
+                                if let Some(name) = target.file_name() {
+                                    let name_str = name.to_string_lossy().to_string();
+                                    for (idx, entry) in self.file_browser.entries.iter().enumerate()
+                                    {
+                                        if entry.name == name_str {
+                                            self.file_browser.list_state.select(Some(idx));
+                                            break;
+                                        }
+                                    }
+                                }
+                                self.update_preview();
+                                self.sync_terminals();
+                                self.check_repo_change();
+                            }
+                        }
+                    }
+                }
+            }
+            DialogAction::OpenMarkdownPreview => {
+                if let Some(path_str) = value {
+                    if !path_str.is_empty() {
+                        // Expand tilde to home directory
+                        let expanded = if path_str.starts_with('~') {
+                            if let Some(home) = dirs::home_dir() {
+                                path_str.replacen('~', &home.display().to_string(), 1)
+                            } else {
+                                path_str.to_string()
+                            }
+                        } else {
+                            path_str.to_string()
+                        };
+                        let target = std::path::PathBuf::from(&expanded);
+                        if target.is_file() {
+                            self.open_in_browser(&target);
+                        }
+                    }
+                }
+            }
+            DialogAction::ExportMarkdown { source, format } => {
+                if let Some(target_str) = value {
+                    if !target_str.is_empty() {
+                        // Expand tilde
+                        let expanded = if target_str.starts_with('~') {
+                            if let Some(home) = dirs::home_dir() {
+                                target_str.replacen('~', &home.display().to_string(), 1)
+                            } else {
+                                target_str.to_string()
+                            }
+                        } else {
+                            target_str.to_string()
+                        };
+                        let target_path = std::path::PathBuf::from(&expanded);
+
+                        // Ensure parent directory exists
+                        if let Some(parent) = target_path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+
+                        let file_stem = source
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("Export");
+                        let project_name = self
+                            .file_browser
+                            .root_dir
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("");
+                        let title = if project_name.is_empty() {
+                            file_stem.to_string()
+                        } else {
+                            format!("{} - {}", project_name, file_stem)
+                        };
+
+                        let options = crate::browser::pdf_export::ExportOptions {
+                            title,
+                            author: self.config.document.resolved_author(),
+                            date: crate::browser::pdf_export::date_now_dmy(),
+                            format,
+                        };
+
+                        if format == crate::browser::pdf_export::ExportFormat::Pdf {
+                            // Async PDF export — run in background thread
+                            let (tx, rx) = std::sync::mpsc::channel();
+                            let doc_config = self.config.document.clone();
+                            let src = source.clone();
+                            let tgt = target_path.clone();
+                            std::thread::spawn(move || {
+                                let result = crate::browser::pdf_export::export_markdown(
+                                    &src,
+                                    &tgt,
+                                    &options,
+                                    &doc_config,
+                                );
+                                let _ = tx.send(crate::types::ExportJobResult::Single(
+                                    result.map_err(|e| format!("{}", e)),
+                                ));
+                            });
+                            self.export_job = super::JobState::running(rx);
+                            self.export_browser = Some(self.config.ui.browser.clone());
+                            // Show progress flash
+                            self.copy_flash_message = Some("Generating PDF...".to_string());
+                            self.copy_flash_lines = 0;
+                            self.last_copy_time = Some(std::time::Instant::now());
+                        } else {
+                            // Markdown export is instant — run synchronously
+                            match crate::browser::pdf_export::export_markdown(
+                                &source,
+                                &target_path,
+                                &options,
+                                &self.config.document,
+                            ) {
+                                Ok(path) => {
+                                    self.copy_flash_message = Some("Markdown exported".to_string());
+                                    self.copy_flash_lines = 0;
+                                    self.last_copy_time = Some(std::time::Instant::now());
+                                    let outcome = crate::browser::remote_open::open_or_transfer(
+                                        &path,
+                                        crate::browser::remote_open::OpenKind::Export,
+                                        &self.config.ui.browser,
+                                        &self.config.ui.remote_transfer,
+                                    );
+                                    self.set_open_flash(outcome);
+                                }
+                                Err(e) => {
+                                    self.dialog.dialog_type = ui::dialog::DialogType::Confirm {
+                                        title: "Export Failed".to_string(),
+                                        message: format!("{}", e),
+                                        action: ui::dialog::DialogAction::DiscardEditorChanges,
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Poll for async PDF export completion (single file or batch folder)
+    pub(crate) fn poll_export_result(&mut self) {
+        use super::PollOutcome;
+        if !self.export_job.is_running() {
+            return;
+        }
+        match self.export_job.poll() {
+            PollOutcome::Ready(result) => {
+                let browser = self.export_browser.take().unwrap_or_default();
+                match result {
+                    crate::types::ExportJobResult::Single(Ok(path)) => {
+                        self.copy_flash_message = Some("PDF exported".to_string());
+                        self.copy_flash_lines = 0;
+                        self.last_copy_time = Some(std::time::Instant::now());
+                        let outcome = crate::browser::remote_open::open_or_transfer(
+                            &path,
+                            crate::browser::remote_open::OpenKind::Export,
+                            &browser,
+                            &self.config.ui.remote_transfer,
+                        );
+                        self.set_open_flash(outcome);
+                    }
+                    crate::types::ExportJobResult::Single(Err(e)) => {
+                        self.copy_flash_message = None;
+                        self.last_copy_time = None;
+                        self.dialog.dialog_type = ui::dialog::DialogType::Confirm {
+                            title: "Export Failed".to_string(),
+                            message: e,
+                            action: ui::dialog::DialogAction::DiscardEditorChanges,
+                        };
+                    }
+                    crate::types::ExportJobResult::Batch(b) => {
+                        if b.failed.is_empty() {
+                            self.copy_flash_message =
+                                Some(format!("{} file(s) exported", b.exported));
+                        } else {
+                            self.copy_flash_message = Some(format!(
+                                "{} exported, {} failed",
+                                b.exported,
+                                b.failed.len()
+                            ));
+                        }
+                        self.copy_flash_lines = 0;
+                        self.last_copy_time = Some(std::time::Instant::now());
+                        // Open target directory in Finder/file manager (local),
+                        // or leave it on the server over SSH. Keep the count
+                        // message; only surface a hard error.
+                        let outcome = crate::browser::remote_open::open_or_transfer(
+                            &b.target_dir,
+                            crate::browser::remote_open::OpenKind::Directory,
+                            &browser,
+                            &self.config.ui.remote_transfer,
+                        );
+                        if let crate::browser::remote_open::OpenOutcome::Error(e) = outcome {
+                            self.clipboard_error_flash =
+                                Some((format!("Open failed: {}", e), std::time::Instant::now()));
+                        }
+                    }
+                }
+            }
+            PollOutcome::Disconnected => {
+                // Worker thread died — clean up state and surface a generic error.
+                self.export_browser.take();
+                self.copy_flash_message = None;
+                self.last_copy_time = None;
+                self.dialog.dialog_type = ui::dialog::DialogType::Confirm {
+                    title: "Export Failed".to_string(),
+                    message: "Export worker terminated unexpectedly.".to_string(),
+                    action: ui::dialog::DialogAction::DiscardEditorChanges,
+                };
+            }
+            PollOutcome::Pending => {
+                // Keep the flash alive while exporting
+                self.last_copy_time = Some(std::time::Instant::now());
+            }
+        }
+    }
+
+    /// Start an async batch export of all .md files in `source` directory.
+    pub(crate) fn start_batch_export(
+        &mut self,
+        source: std::path::PathBuf,
+        format: crate::browser::pdf_export::ExportFormat,
+    ) {
+        // Guard: if already running, ignore
+        if self.export_job.is_running() {
+            return;
+        }
+
+        // Collect top-level .md files (case-insensitive extension)
+        let md_files: Vec<std::path::PathBuf> = std::fs::read_dir(&source)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.is_file()
+                    && p.extension()
+                        .and_then(|x| x.to_str())
+                        .map(|x| {
+                            matches!(
+                                x.to_lowercase().as_str(),
+                                "md" | "markdown" | "mdown" | "mkd"
+                            )
+                        })
+                        .unwrap_or(false)
+            })
+            .collect();
+
+        if md_files.is_empty() {
+            self.copy_flash_message = Some("No .md files in folder".to_string());
+            self.copy_flash_lines = 0;
+            self.last_copy_time = Some(std::time::Instant::now());
+            return;
+        }
+
+        let count = md_files.len();
+        self.copy_flash_message = Some(format!("Exporting {} file(s)\u{2026}", count));
+        self.copy_flash_lines = 0;
+        self.last_copy_time = Some(std::time::Instant::now());
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let doc_config = self.config.document.clone();
+        let target_dir = source.clone();
+        let project_name = self
+            .file_browser
+            .root_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
+
+        std::thread::spawn(move || {
+            let mut exported = 0usize;
+            let mut failed: Vec<(std::path::PathBuf, String)> = Vec::new();
+            for src in &md_files {
+                let filename =
+                    crate::browser::pdf_export::default_export_filename(src, format, &project_name);
+                let out = target_dir.join(&filename);
+                let options = crate::browser::pdf_export::ExportOptions {
+                    title: src
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("Export")
+                        .to_string(),
+                    author: doc_config.resolved_author(),
+                    date: crate::browser::pdf_export::date_now_dmy(),
+                    format,
+                };
+                match crate::browser::pdf_export::export_markdown(src, &out, &options, &doc_config)
+                {
+                    Ok(_) => exported += 1,
+                    Err(e) => failed.push((src.clone(), format!("{}", e))),
+                }
+            }
+            let _ = tx.send(crate::types::ExportJobResult::Batch(
+                crate::types::BatchExportResult {
+                    exported,
+                    failed,
+                    target_dir,
+                },
+            ));
+        });
+        self.export_job = super::JobState::running(rx);
+    }
+
+    /// Open a file in the configured browser (with Markdown→HTML conversion).
+    ///
+    /// On a local session this opens the file as before. Over SSH it routes
+    /// through `remote_open::open_or_transfer`, which streams the file to the
+    /// user's Mac terminal (iTerm2/WezTerm) or, on terminals without transfer
+    /// support, keeps it on disk and reports the path.
+    pub(crate) fn open_in_browser(&mut self, path: &std::path::Path) {
+        use crate::browser::{self, remote_open};
+        let project_name = &self.config.document.company.name;
+        if !browser::can_preview_in_browser(path) {
+            return;
+        }
+        // `is_temp` = the preview is an ephemeral /tmp conversion (Markdown/text
+        // → HTML). PDFs/images are previewed from their real path directly.
+        let (preview_path, is_temp) = if browser::is_markdown(path) {
+            match browser::markdown_to_html(path, &self.config.document, project_name) {
+                Ok(handles) => {
+                    let primary = handles[0].path().to_path_buf();
+                    self.temp_preview_files.extend(handles);
+                    (primary, true)
+                }
+                Err(_) => (path.to_path_buf(), false),
+            }
+        } else if browser::can_syntax_highlight(path) {
+            match browser::text_to_html(path, &self.config.document, project_name) {
+                Ok(tmp) => {
+                    let p = tmp.path().to_path_buf();
+                    self.temp_preview_files.push(tmp);
+                    (p, true)
+                }
+                Err(_) => (path.to_path_buf(), false),
+            }
+        } else {
+            (path.to_path_buf(), false)
+        };
+
+        let outcome = remote_open::open_or_transfer(
+            &preview_path,
+            remote_open::OpenKind::Preview,
+            &self.config.ui.browser,
+            &self.config.ui.remote_transfer,
+        );
+
+        // A temp /tmp path is useless to the user on a remote host — copy the
+        // converted HTML to a stable, user-visible location under export_dir.
+        if is_temp {
+            if let remote_open::OpenOutcome::KeptWithPath(_) = &outcome {
+                if let Some(stable) = self.stable_preview_path(path) {
+                    if let Some(parent) = stable.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if std::fs::copy(&preview_path, &stable).is_ok() {
+                        self.set_open_flash(remote_open::OpenOutcome::KeptWithPath(stable));
+                        return;
+                    }
+                }
+            }
+        }
+        self.set_open_flash(outcome);
+    }
+
+    /// Stable, user-visible path for a remote HTML preview fallback:
+    /// `<export_dir>/.preview/<stem>.html` (overwritten on each `o`).
+    fn stable_preview_path(&self, source: &std::path::Path) -> Option<std::path::PathBuf> {
+        let stem = source
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("preview");
+        let dir = crate::browser::pdf_export::resolve_export_dir(&self.config.ui.export_dir)
+            .join(".preview");
+        Some(dir.join(format!("{}.html", stem)))
+    }
+
+    /// Translate an [`OpenOutcome`] into footer feedback. `OpenedLocally` is a
+    /// no-op so callers can pre-set a context message (e.g. "PDF exported")
+    /// that survives a local open.
+    pub(crate) fn set_open_flash(&mut self, outcome: crate::browser::remote_open::OpenOutcome) {
+        use crate::browser::remote_open::OpenOutcome;
+        match outcome {
+            OpenOutcome::OpenedLocally => {}
+            OpenOutcome::Transferred => {
+                self.copy_flash_message =
+                    Some("\u{2197} Transferred to your Mac (~/Downloads)".to_string());
+                self.copy_flash_lines = 0;
+                self.last_copy_time = Some(std::time::Instant::now());
+            }
+            OpenOutcome::KeptWithPath(p) => {
+                self.copy_flash_message = Some(format!(
+                    "\u{1F4BE} Saved on server: {} (open locally)",
+                    p.display()
+                ));
+                self.copy_flash_lines = 0;
+                self.last_copy_time = Some(std::time::Instant::now());
+            }
+            OpenOutcome::Error(e) => {
+                self.clipboard_error_flash =
+                    Some((format!("Open failed: {}", e), std::time::Instant::now()));
+            }
+        }
+    }
+
+    /// Handle wizard input
+    pub(super) fn handle_wizard_input(&mut self, code: KeyCode, _modifiers: KeyModifiers) {
+        use crate::setup::wizard::WizardStep;
+
+        // If editing a field
+        if self.wizard.editing_field.is_some() {
+            match code {
+                KeyCode::Esc => self.wizard.cancel_editing(),
+                KeyCode::Enter => self.wizard.finish_editing(),
+                KeyCode::Backspace => {
+                    self.wizard.input_buffer.pop();
+                }
+                KeyCode::Char(c) => self.wizard.input_buffer.push(c),
+                _ => {}
+            }
+            return;
+        }
+
+        match code {
+            KeyCode::Esc => {
+                // On Welcome, Esc closes wizard; on other steps, go back
+                if self.wizard.step == WizardStep::Welcome {
+                    self.wizard.close();
+                } else {
+                    self.wizard.prev_step();
+                }
+            }
+            KeyCode::Enter => {
+                if self.wizard.step == WizardStep::Confirmation {
+                    // Save config immediately when confirming
+                    let new_config = self.wizard.generate_config();
+                    self.config = new_config;
+                    if let Err(e) = crate::config::save_config(&self.config) {
+                        eprintln!("Failed to save config: {}", e);
+                    }
+                    self.wizard.next_step(); // Go to Complete
+                } else if self.wizard.step == WizardStep::Complete {
+                    // Adopt the backend chosen in the wizard as the active one and
+                    // persist it so a future argument-less launch resumes it.
+                    self.backend = self.wizard.selected_backend;
+                    crate::session::save_session(&crate::session::SessionState {
+                        last_cwd: self.session.last_cwd.clone(),
+                        last_backend: self.backend,
+                    });
+                    // Close wizard and initialize the AI PTY with the new config.
+                    self.wizard.close();
+                    self.init_claude_after_wizard();
+                } else if self.wizard.can_proceed() {
+                    self.wizard.next_step();
+                }
+            }
+            KeyCode::Tab | KeyCode::Right => {
+                if self.wizard.can_proceed() {
+                    self.wizard.next_step();
+                }
+            }
+            KeyCode::BackTab | KeyCode::Left => {
+                self.wizard.prev_step();
+            }
+            KeyCode::Up | KeyCode::Char('k') => match self.wizard.step {
+                WizardStep::ShellSelection => {
+                    if self.wizard.selected_shell_idx > 0 {
+                        self.wizard.selected_shell_idx -= 1;
+                    }
+                }
+                WizardStep::ClaudeConfig if self.wizard.focused_field > 0 => {
+                    self.wizard.focused_field -= 1;
+                }
+                _ => {}
+            },
+            KeyCode::Down | KeyCode::Char('j') => match self.wizard.step {
+                WizardStep::ShellSelection => {
+                    if self.wizard.selected_shell_idx
+                        < self.wizard.available_shells.len().saturating_sub(1)
+                    {
+                        self.wizard.selected_shell_idx += 1;
+                    }
+                }
+                WizardStep::ClaudeConfig if self.wizard.focused_field < 3 => {
+                    self.wizard.focused_field += 1;
+                }
+                _ => {}
+            },
+            KeyCode::Char('e') | KeyCode::Char('E') => {
+                // Edit the focused CLI path in the Tool Configuration step.
+                if self.wizard.step == WizardStep::ClaudeConfig {
+                    use crate::setup::wizard::WizardField;
+                    let field = match self.wizard.focused_field {
+                        0 => WizardField::ClaudePath,
+                        1 => WizardField::OpenCodePath,
+                        2 => WizardField::PiPath,
+                        _ => WizardField::LazygitPath,
+                    };
+                    self.wizard.start_editing(field);
+                }
+            }
+            KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3')
+                if self.wizard.step == WizardStep::ClaudeConfig =>
+            {
+                // Choose the default AI backend for argument-less launches.
+                use crate::backend::AiBackend;
+                self.wizard.selected_backend = match code {
+                    KeyCode::Char('1') => AiBackend::Claude,
+                    KeyCode::Char('2') => AiBackend::OpenCode,
+                    _ => AiBackend::Pi,
+                };
+            }
+            KeyCode::Char('m') | KeyCode::Char('M')
+                if self.wizard.step == WizardStep::SshImagePaste =>
+            {
+                // Toggle "mark as configured" on the SSH image-paste step.
+                // Persisted by `generate_config()` as
+                // `config.ssh.notification_dismissed = true` so the runtime
+                // hint stays silent.
+                self.wizard.ssh_image_paste_marked_configured =
+                    !self.wizard.ssh_image_paste_marked_configured;
+            }
+            _ => {}
+        }
+    }
+
+    /// Handle settings input
+    pub(super) fn handle_settings_input(&mut self, code: KeyCode, modifiers: KeyModifiers) {
+        // Dropdown handling (highest priority)
+        if self.settings.has_dropdown() {
+            match code {
+                KeyCode::Esc => self.settings.dropdown = None,
+                KeyCode::Up | KeyCode::Char('k') => self.settings.dropdown_move_up(),
+                KeyCode::Down | KeyCode::Char('j') => self.settings.dropdown_move_down(),
+                KeyCode::Enter => {
+                    self.settings.dropdown_confirm();
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // If editing a field
+        if self.settings.editing.is_some() {
+            match code {
+                KeyCode::Esc => self.settings.cancel_editing(),
+                KeyCode::Enter => self.settings.finish_editing(),
+                KeyCode::Backspace => {
+                    self.settings.input_buffer.pop();
+                }
+                KeyCode::Char(c) => {
+                    if modifiers.contains(KeyModifiers::CONTROL) {
+                        match c {
+                            'v' => {
+                                if let Some(text) = crate::clipboard::paste_from_clipboard() {
+                                    self.settings.input_buffer.push_str(&text);
+                                }
+                            }
+                            'c' => self.settings.cancel_editing(),
+                            _ => {}
+                        }
+                    } else {
+                        self.settings.input_buffer.push(c);
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        match code {
+            KeyCode::Esc => {
+                // Auto-save changes before closing
+                if self.settings.has_changes {
+                    self.settings.apply_to_config(&mut self.config);
+                    if let Err(e) = crate::config::save_config(&self.config) {
+                        eprintln!("Failed to save config: {}", e);
+                    }
+                }
+                self.settings.close();
+            }
+            KeyCode::Tab => {
+                self.settings.next_category();
+            }
+            KeyCode::BackTab => {
+                self.settings.prev_category();
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.settings.move_up();
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.settings.move_down();
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                // Check if "Check for Updates" is selected
+                if self.settings.is_check_updates_selected() {
+                    self.settings.close();
+                    self.trigger_update_check();
+                } else {
+                    self.settings.toggle_or_select();
+                }
+            }
+            KeyCode::Char('s') | KeyCode::Char('S') => {
+                // Save and close
+                if self.settings.has_changes {
+                    self.settings.apply_to_config(&mut self.config);
+                    if let Err(e) = crate::config::save_config(&self.config) {
+                        eprintln!("Failed to save config: {}", e);
+                    }
+                }
+                self.settings.close();
+            }
+            _ => {}
+        }
+    }
+}
+
+// --- Unit tests for batch export helpers ---
+
+#[cfg(test)]
+mod batch_export_tests {
+    use std::path::{Path, PathBuf};
+
+    /// The same filter predicate used in start_batch_export — extracted as a testable fn.
+    fn is_md_file(p: &Path) -> bool {
+        p.is_file()
+            && p.extension()
+                .and_then(|x| x.to_str())
+                .map(|x| {
+                    matches!(
+                        x.to_lowercase().as_str(),
+                        "md" | "markdown" | "mdown" | "mkd"
+                    )
+                })
+                .unwrap_or(false)
+    }
+
+    #[test]
+    fn test_filter_md_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        // Create test files
+        let a = dir.join("a.md");
+        let b = dir.join("b.txt");
+        let c = dir.join("c.MD"); // uppercase extension
+        let d = dir.join("d.markdown");
+        let e = dir.join("e.rs");
+        for p in &[&a, &b, &c, &d, &e] {
+            std::fs::write(p, "x").unwrap();
+        }
+
+        let paths: Vec<PathBuf> = vec![a.clone(), b.clone(), c.clone(), d.clone(), e.clone()];
+        let filtered: Vec<&PathBuf> = paths.iter().filter(|p| is_md_file(p)).collect();
+
+        assert!(filtered.contains(&&a), "a.md must be included");
+        assert!(!filtered.contains(&&b), "b.txt must be excluded");
+        assert!(filtered.contains(&&c), "c.MD (uppercase) must be included");
+        assert!(filtered.contains(&&d), "d.markdown must be included");
+        assert!(!filtered.contains(&&e), "e.rs must be excluded");
+        assert_eq!(filtered.len(), 3, "exactly 3 md files expected");
+    }
+
+    #[test]
+    fn test_batch_result_flash_format_success() {
+        let b = crate::types::BatchExportResult {
+            exported: 9,
+            failed: vec![],
+            target_dir: PathBuf::from("/tmp/test"),
+        };
+        let flash = if b.failed.is_empty() {
+            format!("{} file(s) exported", b.exported)
+        } else {
+            format!("{} exported, {} failed", b.exported, b.failed.len())
+        };
+        assert_eq!(flash, "9 file(s) exported");
+    }
+
+    #[test]
+    fn test_batch_result_flash_format_partial_failure() {
+        let b = crate::types::BatchExportResult {
+            exported: 7,
+            failed: vec![
+                (PathBuf::from("/tmp/a.md"), "err1".to_string()),
+                (PathBuf::from("/tmp/b.md"), "err2".to_string()),
+            ],
+            target_dir: PathBuf::from("/tmp/test"),
+        };
+        let flash = if b.failed.is_empty() {
+            format!("{} file(s) exported", b.exported)
+        } else {
+            format!("{} exported, {} failed", b.exported, b.failed.len())
+        };
+        assert_eq!(flash, "7 exported, 2 failed");
+    }
+
+    #[test]
+    fn test_empty_folder_no_md_files() {
+        // Verify the filter returns empty for a dir with no .md files
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::write(dir.join("readme.txt"), "x").unwrap();
+        std::fs::write(dir.join("main.rs"), "x").unwrap();
+
+        let md_files: Vec<PathBuf> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| is_md_file(p))
+            .collect();
+
+        assert!(
+            md_files.is_empty(),
+            "expected no md files, found: {:?}",
+            md_files
+        );
+    }
+}

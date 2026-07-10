@@ -1,0 +1,226 @@
+//! Syntax-highlighted HTML preview for text files
+//!
+//! Uses syntect for syntax highlighting with support for 500+ languages.
+//! Delegates file type detection to the central `syntax_registry` module.
+
+use anyhow::Result;
+use std::path::Path;
+use syntect::{highlighting::ThemeSet, html::highlighted_html_for_string, parsing::SyntaxSet};
+
+use crate::browser::template::TemplateContext;
+use crate::config::DocumentConfig;
+
+/// Build syntax highlight HTML template dynamically from config.
+/// This is a dark-mode-only template (code viewer) that uses TemplateContext
+/// for consistent footer styling while keeping dark theme colors for the code viewer.
+fn build_syntax_template(doc: &DocumentConfig) -> String {
+    let ctx = TemplateContext::new(doc);
+    let code_font = &doc.fonts.code;
+    let code_size = &doc.sizes.code;
+    let code_line_height = &doc.sizes.code_line_height;
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{title}}</title>
+    <style>
+        :root {{
+            color-scheme: dark;
+        }}
+        body {{
+            font-family: {code_font};
+            margin: 0;
+            padding: 0;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }}
+        .header {{
+            background: #2d2d2d;
+            padding: 12px 20px;
+            border-bottom: 1px solid #404040;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .filename {{
+            color: #6db3f2;
+            font-weight: 600;
+        }}
+        .meta {{
+            color: #888;
+            font-size: 0.85em;
+        }}
+        .content {{
+            padding: 0;
+            overflow-x: auto;
+        }}
+        pre {{
+            margin: 0;
+            padding: 16px 20px;
+            line-height: {code_line_height};
+            font-size: {code_size};
+            overflow-x: auto;
+        }}
+        .footer {{
+            background: #2d2d2d;
+            padding: 8px 20px;
+            border-top: 1px solid #404040;
+            font-size: {footer_size};
+            color: {footer_color};
+            text-align: center;
+        }}
+    </style>
+</head>
+<body>
+<div class="header">
+    <span class="filename">{{filename}}</span>
+    <span class="meta">{{language}} • {{size}} • {{lines}} lines</span>
+</div>
+<div class="content">
+{{highlighted_code}}
+</div>
+<div class="footer">
+    {footer_text}
+</div>
+</body>
+</html>"#,
+        code_font = code_font,
+        code_size = code_size,
+        code_line_height = code_line_height,
+        footer_size = doc.sizes.footer,
+        footer_color = doc.colors.footer,
+        footer_text = ctx.footer_text(),
+    )
+}
+
+/// Check if file can be syntax-highlighted via syntect
+pub fn can_syntax_highlight(path: &Path) -> bool {
+    let ss = SyntaxSet::load_defaults_newlines();
+    crate::syntax_registry::is_known_text_file(path, &ss)
+}
+
+/// Convert text file to HTML with syntax highlighting.
+/// Returns a `NamedTempFile` handle (O_EXCL, auto-deleted on drop).
+/// Caller must keep the handle alive until the browser has opened the file.
+pub fn text_to_html(
+    path: &Path,
+    doc: &DocumentConfig,
+    project_name: &str,
+) -> Result<tempfile::NamedTempFile> {
+    use std::io::Write;
+
+    let content = std::fs::read_to_string(path)?;
+    let ss = SyntaxSet::load_defaults_newlines();
+    let ts = ThemeSet::load_defaults();
+
+    // Get syntax for this file via central registry
+    let syntax = crate::syntax_registry::find_syntax_for_path(path, &ss);
+
+    // Use base16-ocean.dark theme (dark mode friendly)
+    let theme = &ts.themes["base16-ocean.dark"];
+
+    // Generate highlighted HTML
+    let highlighted = highlighted_html_for_string(&content, &ss, syntax, theme)?;
+
+    // Get file metadata
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    let language = crate::syntax_registry::display_name_for_path(path, &ss);
+    let size = format_file_size(content.len());
+    let lines = content.lines().count();
+
+    // Build final HTML from config-driven template
+    let template = build_syntax_template(doc);
+    let html = template
+        .replace("{title}", filename)
+        .replace("{filename}", filename)
+        .replace("{language}", &language)
+        .replace("{size}", &size)
+        .replace("{lines}", &lines.to_string())
+        .replace("{highlighted_code}", &highlighted);
+
+    // Create secure temp file (O_EXCL) and write content
+    let mut tmp = crate::browser::pdf_export::default_preview_file(path, project_name)?;
+    tmp.write_all(html.as_bytes())?;
+    tmp.flush()?;
+    Ok(tmp)
+}
+
+/// Format file size in human-readable form
+fn format_file_size(bytes: usize) -> String {
+    const KB: usize = 1024;
+    const MB: usize = KB * 1024;
+
+    if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_can_syntax_highlight() {
+        // Common code files (verified in syntect defaults)
+        assert!(can_syntax_highlight(Path::new("test.rs")));
+        assert!(can_syntax_highlight(Path::new("test.py")));
+        assert!(can_syntax_highlight(Path::new("test.js")));
+        assert!(can_syntax_highlight(Path::new("test.java")));
+        assert!(can_syntax_highlight(Path::new("test.c")));
+        assert!(can_syntax_highlight(Path::new("test.cpp")));
+        assert!(can_syntax_highlight(Path::new("test.h")));
+        assert!(can_syntax_highlight(Path::new("test.rb")));
+
+        // Config files (yaml/json supported by default)
+        assert!(can_syntax_highlight(Path::new("config.yaml")));
+        assert!(can_syntax_highlight(Path::new("config.json")));
+
+        // Shell scripts
+        assert!(can_syntax_highlight(Path::new("script.sh")));
+
+        // Web files
+        assert!(can_syntax_highlight(Path::new("page.html")));
+        assert!(can_syntax_highlight(Path::new("style.css")));
+        assert!(can_syntax_highlight(Path::new("data.xml")));
+
+        // Special files by name
+        assert!(can_syntax_highlight(Path::new("Makefile")));
+        assert!(can_syntax_highlight(Path::new("Dockerfile")));
+
+        // NEW: Config/text files via registry
+        assert!(can_syntax_highlight(Path::new("config.toml")));
+        assert!(can_syntax_highlight(Path::new("nginx.conf")));
+        assert!(can_syntax_highlight(Path::new("settings.ini")));
+        assert!(can_syntax_highlight(Path::new("settings.cfg")));
+        assert!(can_syntax_highlight(Path::new("app.log")));
+        assert!(can_syntax_highlight(Path::new("data.csv")));
+        assert!(can_syntax_highlight(Path::new("unit.service")));
+        assert!(can_syntax_highlight(Path::new("main.tf")));
+        assert!(can_syntax_highlight(Path::new(".bashrc")));
+        assert!(can_syntax_highlight(Path::new(".gitignore")));
+        assert!(can_syntax_highlight(Path::new(".env.local")));
+
+        // Non-text files should return false
+        assert!(!can_syntax_highlight(Path::new("image.png")));
+        assert!(!can_syntax_highlight(Path::new("binary.exe")));
+        assert!(!can_syntax_highlight(Path::new("document.pdf")));
+    }
+
+    #[test]
+    fn test_format_file_size() {
+        assert_eq!(format_file_size(500), "500 B");
+        assert_eq!(format_file_size(1024), "1.0 KB");
+        assert_eq!(format_file_size(1536), "1.5 KB");
+        assert_eq!(format_file_size(1048576), "1.0 MB");
+    }
+}

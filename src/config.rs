@@ -1,0 +1,904 @@
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
+
+use crate::types::{ClaudeEffort, ClaudeModel, ClaudePermissionMode};
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct Config {
+    pub terminal: TerminalConfig,
+    pub ui: UiConfig,
+    #[serde(default)]
+    pub layout: LayoutConfig,
+    #[serde(default)]
+    pub file_browser: FileBrowserConfig,
+    #[serde(default)]
+    pub pty: PtyConfig,
+    #[serde(default)]
+    pub setup: SetupConfig,
+    #[serde(default)]
+    pub claude: ClaudeConfig,
+    #[serde(default)]
+    pub document: DocumentConfig,
+    #[serde(default)]
+    pub ssh: SshConfig,
+}
+
+/// PTY configuration for all terminal panes
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct PtyConfig {
+    /// Command for the AI pane in Claude mode (default: `["claude"]`).
+    pub claude_command: Vec<String>,
+    /// Command for the AI pane in OpenCode mode (default: `["opencode"]`).
+    #[serde(default = "default_opencode_command")]
+    pub opencode_command: Vec<String>,
+    /// Command for the AI pane in Pi mode (default: `["pi"]`).
+    #[serde(default = "default_pi_command")]
+    pub pi_command: Vec<String>,
+    pub lazygit_command: Vec<String>,
+    pub scrollback_lines: usize,
+    /// Auto-restart PTY processes when they exit (default: true)
+    #[serde(default = "default_true")]
+    pub auto_restart: bool,
+    /// Number of lines to copy when pressing F9 in terminal panes (default: 50)
+    #[serde(default = "default_copy_lines_count")]
+    pub copy_lines_count: usize,
+    /// Leader key for the User-Terminal-pane passthrough (tmux-style). Format
+    /// `"ctrl+<letter>"` (default `"ctrl+b"`). When passthrough is active, all
+    /// keys go straight to the PTY (so nano/mc/vim work) and Workbench commands
+    /// are reached via this prefix. An empty string or `"none"` disables
+    /// passthrough and restores the legacy behavior (F-keys = Workbench).
+    #[serde(default = "default_terminal_prefix")]
+    pub terminal_prefix: String,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_copy_lines_count() -> usize {
+    50
+}
+
+fn default_terminal_prefix() -> String {
+    "ctrl+b".to_string()
+}
+
+fn default_opencode_command() -> Vec<String> {
+    vec!["opencode".to_string()]
+}
+
+fn default_pi_command() -> Vec<String> {
+    vec!["pi".to_string()]
+}
+
+impl PtyConfig {
+    /// The configured command for the AI pane in the given backend mode.
+    pub fn command_for(&self, backend: crate::backend::AiBackend) -> &Vec<String> {
+        use crate::backend::AiBackend;
+        match backend {
+            AiBackend::Claude => &self.claude_command,
+            AiBackend::OpenCode => &self.opencode_command,
+            AiBackend::Pi => &self.pi_command,
+        }
+    }
+
+    /// Parse `terminal_prefix` into the Ctrl+<char> leader key.
+    /// Returns `None` when passthrough is disabled (`""` / `"none"`) or the
+    /// value is malformed. Accepts `"ctrl+b"` and `"c-b"`, case-insensitive.
+    pub fn prefix_key(&self) -> Option<char> {
+        let s = self.terminal_prefix.trim().to_ascii_lowercase();
+        if s.is_empty() || s == "none" {
+            return None;
+        }
+        let rest = s.strip_prefix("ctrl+").or_else(|| s.strip_prefix("c-"))?;
+        let mut chars = rest.chars();
+        let c = chars.next()?;
+        if chars.next().is_some() || !c.is_ascii_alphabetic() {
+            return None;
+        }
+        Some(c)
+    }
+}
+
+/// Detect the best available default shell for this platform.
+///
+/// Windows lookup order:
+///   1. `%COMSPEC%` env var (set by Windows itself, usually `C:\Windows\System32\cmd.exe`)
+///   2. `pwsh.exe` (PowerShell 7+) if reachable via PATH
+///   3. `powershell.exe` (Windows PowerShell 5.x) if reachable via PATH
+///   4. Hardcoded `C:\Windows\System32\cmd.exe` as last-resort fallback
+///
+/// Unix lookup order:
+///   1. `$SHELL` env var
+///   2. `/bin/bash` fallback
+pub fn default_shell_path() -> String {
+    #[cfg(windows)]
+    {
+        if let Ok(comspec) = std::env::var("COMSPEC") {
+            if !comspec.is_empty() {
+                return comspec;
+            }
+        }
+        for candidate in &["pwsh.exe", "powershell.exe"] {
+            let probe = std::process::Command::new(candidate)
+                .arg("-NoLogo")
+                .arg("-NoProfile")
+                .arg("-Command")
+                .arg("exit 0")
+                .output();
+            if probe.map(|o| o.status.success()).unwrap_or(false) {
+                return (*candidate).to_string();
+            }
+        }
+        r"C:\Windows\System32\cmd.exe".to_string()
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
+    }
+}
+
+impl Default for PtyConfig {
+    fn default() -> Self {
+        Self {
+            // Each backend defaults to its CLI binary; AI pane runs out of the box.
+            claude_command: vec!["claude".to_string()],
+            opencode_command: default_opencode_command(),
+            pi_command: default_pi_command(),
+            lazygit_command: vec!["lazygit".to_string()],
+            scrollback_lines: 1000,
+            auto_restart: true,
+            copy_lines_count: 50,
+            terminal_prefix: default_terminal_prefix(),
+        }
+    }
+}
+
+/// Setup/wizard state persisted in config
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct SetupConfig {
+    pub wizard_completed: bool,
+    pub wizard_version: u8,
+    pub active_template: String,
+}
+
+/// Claude startup prefix definition
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ClaudePrefix {
+    pub name: String,
+    pub prefix: String,
+    pub description: String,
+}
+
+/// Claude-specific configuration
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ClaudeConfig {
+    /// Startup prefixes shown in dialog
+    #[serde(default)]
+    pub startup_prefixes: Vec<ClaudePrefix>,
+    /// Default permission mode (if set, skips the dialog)
+    #[serde(default)]
+    pub default_permission_mode: Option<ClaudePermissionMode>,
+    /// Show permission mode selection dialog at startup (default: true)
+    #[serde(default = "default_show_permission_dialog")]
+    pub show_permission_dialog: bool,
+    /// Enable remote control mode (claude remote-control) for session sharing
+    #[serde(default)]
+    pub remote_control: bool,
+    /// Default Claude model (--model flag)
+    #[serde(default)]
+    pub default_model: ClaudeModel,
+    /// Default reasoning effort level (--effort flag)
+    #[serde(default)]
+    pub default_effort: ClaudeEffort,
+    /// Default session name (--name flag, empty = not passed)
+    #[serde(default)]
+    pub default_session_name: String,
+    /// Default worktree name (--worktree flag, empty = not passed)
+    #[serde(default)]
+    pub default_worktree: String,
+}
+
+impl Default for ClaudeConfig {
+    fn default() -> Self {
+        Self {
+            startup_prefixes: Vec::new(),
+            default_permission_mode: None,
+            show_permission_dialog: true, // Dialog is shown by default
+            remote_control: false,
+            default_model: ClaudeModel::Unset,
+            default_effort: ClaudeEffort::Unset,
+            default_session_name: String::new(),
+            default_worktree: String::new(),
+        }
+    }
+}
+
+fn default_show_permission_dialog() -> bool {
+    true
+}
+
+/// SSH-specific configuration.
+///
+/// Activates when `clipboard::is_ssh_session()` reports true. Image paste in
+/// the Claude pane (`Ctrl+V`) cannot read the upstream Mac/Windows pasteboard
+/// over an SSH PTY — the workbench surfaces this via a one-time footer hint
+/// and offers `cc-clip` (https://github.com/ShunmeiCho/cc-clip) as a tested
+/// integration path.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SshConfig {
+    /// Enable SSH-specific behavior (footer hint, wizard step). Defaults to
+    /// true; users can opt out via Settings if false-positives appear.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// Optional override path to the `cc-clip` binary used for image paste
+    /// over SSH. `None` lets the workbench fall back to a `$PATH` lookup.
+    #[serde(default)]
+    pub image_paste_helper: Option<String>,
+    /// Persisted flag: once the user has seen the SSH paste hint, do not
+    /// flash it again. Reset via Settings → SSH.
+    #[serde(default)]
+    pub notification_dismissed: bool,
+}
+
+impl Default for SshConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            image_paste_helper: None,
+            notification_dismissed: false,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct TerminalConfig {
+    pub shell_path: String,
+    pub shell_args: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UiConfig {
+    pub theme: String,
+    #[serde(default)]
+    pub autosave: bool,
+    #[serde(default = "default_true")]
+    pub show_file_browser: bool,
+    #[serde(default)]
+    pub show_terminal: bool,
+    #[serde(default)]
+    pub show_lazygit: bool,
+    #[serde(default = "default_true")]
+    pub show_preview: bool,
+    /// Browser command for opening files (empty = system default)
+    #[serde(default)]
+    pub browser: String,
+    /// External GUI editor command (empty = not configured)
+    #[serde(default)]
+    pub external_editor: String,
+    /// Default export directory for Markdown/PDF exports (empty = ~/Downloads)
+    #[serde(default)]
+    pub export_dir: String,
+    /// Remote (SSH) file-transfer mode for open/export actions:
+    /// "auto" (default, terminal capability detection), "off" (never transfer —
+    /// keep files on the server and report the path), or a forced override
+    /// "iterm2"/"wezterm" for terminals whose env-vars aren't detected (e.g.
+    /// tmux/SSH stripping `TERM_PROGRAM`).
+    #[serde(default = "default_remote_transfer")]
+    pub remote_transfer: String,
+}
+
+fn default_remote_transfer() -> String {
+    "auto".to_string()
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct LayoutConfig {
+    pub claude_height_percent: u16,
+    pub file_browser_width_percent: u16,
+    pub preview_width_percent: u16,
+    pub right_panel_width_percent: u16,
+}
+
+impl Default for LayoutConfig {
+    fn default() -> Self {
+        Self {
+            claude_height_percent: 40,
+            file_browser_width_percent: 20,
+            preview_width_percent: 50,
+            right_panel_width_percent: 30,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct FileBrowserConfig {
+    pub show_hidden: bool,
+    pub show_file_info: bool,
+    pub date_format: String,
+    pub auto_refresh_ms: u64, // 0 = disabled
+}
+
+impl Default for FileBrowserConfig {
+    fn default() -> Self {
+        Self {
+            show_hidden: true, // Show hidden files by default (toggle with '.')
+            show_file_info: true,
+            date_format: "%d.%m.%Y %H:%M:%S".to_string(),
+            auto_refresh_ms: 2000, // 2 seconds
+        }
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            terminal: TerminalConfig {
+                shell_path: default_shell_path(),
+                shell_args: vec![],
+            },
+            ui: UiConfig {
+                theme: "default".into(),
+                autosave: false,
+                show_file_browser: true,
+                show_terminal: false,
+                show_lazygit: false,
+                show_preview: true,
+                browser: String::new(),
+                external_editor: String::new(),
+                export_dir: String::new(),
+                remote_transfer: default_remote_transfer(),
+            },
+            layout: LayoutConfig::default(),
+            file_browser: FileBrowserConfig::default(),
+            pty: PtyConfig::default(),
+            setup: SetupConfig::default(),
+            claude: ClaudeConfig::default(),
+            document: DocumentConfig::default(),
+            ssh: SshConfig::default(),
+        }
+    }
+}
+
+// --- Document export configuration (HTML/PDF templates) ---
+
+/// Company/branding configuration for document exports
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct CompanyConfig {
+    /// Company name used in footer and author fields
+    #[serde(default = "default_company_name")]
+    pub name: String,
+    /// Footer text template — {company_name} is replaced with company.name
+    #[serde(default = "default_footer_text")]
+    pub footer_text: String,
+    /// Author text template — {company_name} is replaced with company.name
+    #[serde(default = "default_author_text")]
+    pub author: String,
+    /// Company website (optional, shown in footer if set)
+    #[serde(default)]
+    pub website: String,
+}
+
+fn default_company_name() -> String {
+    "Musterfirma".to_string()
+}
+fn default_footer_text() -> String {
+    "Generated by {company_name}".to_string()
+}
+fn default_author_text() -> String {
+    "{company_name}".to_string()
+}
+
+impl Default for CompanyConfig {
+    fn default() -> Self {
+        Self {
+            name: default_company_name(),
+            footer_text: default_footer_text(),
+            author: default_author_text(),
+            website: String::new(),
+        }
+    }
+}
+
+/// Font configuration for document exports
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DocFontConfig {
+    /// Body font family (CSS font-family for HTML, font name for PDF)
+    #[serde(default = "default_body_font")]
+    pub body: String,
+    /// Code/monospace font family
+    #[serde(default = "default_code_font")]
+    pub code: String,
+}
+
+fn default_body_font() -> String {
+    "Calibri, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif"
+        .to_string()
+}
+fn default_code_font() -> String {
+    "'SF Mono', Monaco, 'Cascadia Code', Consolas, monospace".to_string()
+}
+
+impl Default for DocFontConfig {
+    fn default() -> Self {
+        Self {
+            body: default_body_font(),
+            code: default_code_font(),
+        }
+    }
+}
+
+/// Color configuration for document exports
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DocColorConfig {
+    /// Accent color for interactive elements
+    #[serde(default = "default_accent_color")]
+    pub accent: String,
+    /// Table header background color
+    #[serde(default = "default_table_header_bg")]
+    pub table_header_bg: String,
+    /// Table border color
+    #[serde(default = "default_table_border")]
+    pub table_border: String,
+    /// Link color
+    #[serde(default = "default_link_color")]
+    pub link: String,
+    /// Footer text color
+    #[serde(default = "default_footer_color")]
+    pub footer: String,
+    /// Header/footer separator line color
+    #[serde(default = "default_header_border")]
+    pub header_border: String,
+    /// Code/pre block background color
+    #[serde(default = "default_code_bg")]
+    pub code_bg: String,
+    /// H1/H2 heading separator line color
+    #[serde(default = "default_heading_separator")]
+    pub heading_separator: String,
+    /// Body text color
+    #[serde(default = "default_body_text_color")]
+    pub body_text: String,
+    /// Table header text color
+    #[serde(default = "default_table_header_text")]
+    pub table_header_text: String,
+    /// Table alternating row background (zebra stripe)
+    #[serde(default = "default_table_row_alt_bg")]
+    pub table_row_alt_bg: String,
+    /// Blockquote left border color
+    #[serde(default = "default_blockquote_border")]
+    pub blockquote_border: String,
+    /// Blockquote text color
+    #[serde(default = "default_blockquote_text")]
+    pub blockquote_text: String,
+    /// Blockquote background color
+    #[serde(default = "default_blockquote_bg")]
+    pub blockquote_bg: String,
+}
+
+fn default_accent_color() -> String {
+    "#0366d6".to_string()
+}
+fn default_table_header_bg() -> String {
+    "#D5E8F0".to_string()
+}
+fn default_table_border() -> String {
+    "#999999".to_string()
+}
+fn default_link_color() -> String {
+    "#0366d6".to_string()
+}
+fn default_footer_color() -> String {
+    "#999999".to_string()
+}
+fn default_header_border() -> String {
+    "#999999".to_string()
+}
+fn default_code_bg() -> String {
+    "#f4f4f4".to_string()
+}
+fn default_heading_separator() -> String {
+    "#cccccc".to_string()
+}
+fn default_body_text_color() -> String {
+    "#333333".to_string()
+}
+fn default_table_header_text() -> String {
+    "#1a1a1a".to_string()
+}
+fn default_table_row_alt_bg() -> String {
+    "#fafafa".to_string()
+}
+fn default_blockquote_border() -> String {
+    "#dddddd".to_string()
+}
+fn default_blockquote_text() -> String {
+    "#666666".to_string()
+}
+fn default_blockquote_bg() -> String {
+    "#f9f9f9".to_string()
+}
+
+impl Default for DocColorConfig {
+    fn default() -> Self {
+        Self {
+            accent: default_accent_color(),
+            table_header_bg: default_table_header_bg(),
+            table_border: default_table_border(),
+            link: default_link_color(),
+            footer: default_footer_color(),
+            header_border: default_header_border(),
+            code_bg: default_code_bg(),
+            heading_separator: default_heading_separator(),
+            body_text: default_body_text_color(),
+            table_header_text: default_table_header_text(),
+            table_row_alt_bg: default_table_row_alt_bg(),
+            blockquote_border: default_blockquote_border(),
+            blockquote_text: default_blockquote_text(),
+            blockquote_bg: default_blockquote_bg(),
+        }
+    }
+}
+
+/// Font size configuration for document exports (CSS-compatible strings, e.g. "10pt")
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct DocSizeConfig {
+    /// Title font size
+    #[serde(default = "default_size_title")]
+    pub title: String,
+    /// Heading 1 font size
+    #[serde(default = "default_size_h1")]
+    pub h1: String,
+    /// Heading 2 font size
+    #[serde(default = "default_size_h2")]
+    pub h2: String,
+    /// Heading 3 font size
+    #[serde(default = "default_size_h3")]
+    pub h3: String,
+    /// Body text font size
+    #[serde(default = "default_size_body")]
+    pub body: String,
+    /// Table text font size
+    #[serde(default = "default_size_table")]
+    pub table: String,
+    /// Code block font size
+    #[serde(default = "default_size_code")]
+    pub code: String,
+    /// Footer text font size
+    #[serde(default = "default_size_footer")]
+    pub footer: String,
+    /// PDF header text font size
+    #[serde(default = "default_size_header")]
+    pub header: String,
+    /// Body line height (e.g. "1.6")
+    #[serde(default = "default_size_line_height")]
+    pub line_height: String,
+    /// Code block line height (e.g. "1.4")
+    #[serde(default = "default_size_code_line_height")]
+    pub code_line_height: String,
+    /// Code block inset/padding for PDF (e.g. "10pt")
+    #[serde(default = "default_size_code_block_inset")]
+    pub code_block_inset: String,
+    /// Table cell padding for HTML (e.g. "6px 12px")
+    #[serde(default = "default_size_table_cell_padding")]
+    pub table_cell_padding: String,
+    /// Table cell inset for PDF (e.g. "8pt")
+    #[serde(default = "default_size_table_cell_inset")]
+    pub table_cell_inset: String,
+}
+
+fn default_size_title() -> String {
+    "16pt".to_string()
+}
+fn default_size_h1() -> String {
+    "14pt".to_string()
+}
+fn default_size_h2() -> String {
+    "12pt".to_string()
+}
+fn default_size_h3() -> String {
+    "11pt".to_string()
+}
+fn default_size_body() -> String {
+    "10pt".to_string()
+}
+fn default_size_table() -> String {
+    "9pt".to_string()
+}
+fn default_size_code() -> String {
+    "9pt".to_string()
+}
+fn default_size_footer() -> String {
+    "8pt".to_string()
+}
+fn default_size_header() -> String {
+    "9pt".to_string()
+}
+fn default_size_line_height() -> String {
+    "1.6".to_string()
+}
+fn default_size_code_line_height() -> String {
+    "1.4".to_string()
+}
+fn default_size_code_block_inset() -> String {
+    "10pt".to_string()
+}
+fn default_size_table_cell_padding() -> String {
+    "6px 12px".to_string()
+}
+fn default_size_table_cell_inset() -> String {
+    "8pt".to_string()
+}
+
+impl Default for DocSizeConfig {
+    fn default() -> Self {
+        Self {
+            title: default_size_title(),
+            h1: default_size_h1(),
+            h2: default_size_h2(),
+            h3: default_size_h3(),
+            body: default_size_body(),
+            table: default_size_table(),
+            code: default_size_code(),
+            footer: default_size_footer(),
+            header: default_size_header(),
+            line_height: default_size_line_height(),
+            code_line_height: default_size_code_line_height(),
+            code_block_inset: default_size_code_block_inset(),
+            table_cell_padding: default_size_table_cell_padding(),
+            table_cell_inset: default_size_table_cell_inset(),
+        }
+    }
+}
+
+/// PDF page configuration
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct PdfPageConfig {
+    /// Page size (e.g. "A4", "Letter")
+    #[serde(default = "default_page_size")]
+    pub page_size: String,
+    /// Uniform page margin fallback (e.g. "2.5cm", "1in"). Used for any side
+    /// whose dedicated per-side value below is left empty.
+    #[serde(default = "default_page_margin")]
+    pub margin: String,
+    /// Per-side page margins. Empty string → fall back to `margin`.
+    /// Kept optional with empty default so older config.yaml files load unchanged.
+    #[serde(default)]
+    pub margin_top: String,
+    #[serde(default)]
+    pub margin_right: String,
+    #[serde(default)]
+    pub margin_bottom: String,
+    #[serde(default)]
+    pub margin_left: String,
+}
+
+fn default_page_size() -> String {
+    "A4".to_string()
+}
+fn default_page_margin() -> String {
+    "2.5cm".to_string()
+}
+
+impl PdfPageConfig {
+    /// Resolve the four page margins as `(top, right, bottom, left)`.
+    ///
+    /// Each side uses its dedicated per-side value when non-empty, otherwise
+    /// falls back to the uniform `margin`. With a default config this yields
+    /// `2.5cm` on all sides — identical to the previous single-margin behaviour.
+    pub fn resolved_margins(&self) -> (String, String, String, String) {
+        let pick = |side: &str| -> String {
+            if side.trim().is_empty() {
+                self.margin.clone()
+            } else {
+                side.trim().to_string()
+            }
+        };
+        (
+            pick(&self.margin_top),
+            pick(&self.margin_right),
+            pick(&self.margin_bottom),
+            pick(&self.margin_left),
+        )
+    }
+}
+
+impl Default for PdfPageConfig {
+    fn default() -> Self {
+        Self {
+            page_size: default_page_size(),
+            margin: default_page_margin(),
+            margin_top: String::new(),
+            margin_right: String::new(),
+            margin_bottom: String::new(),
+            margin_left: String::new(),
+        }
+    }
+}
+
+/// Central document configuration for HTML and PDF exports
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct DocumentConfig {
+    #[serde(default)]
+    pub company: CompanyConfig,
+    #[serde(default)]
+    pub fonts: DocFontConfig,
+    #[serde(default)]
+    pub colors: DocColorConfig,
+    #[serde(default)]
+    pub sizes: DocSizeConfig,
+    #[serde(default)]
+    pub pdf: PdfPageConfig,
+}
+
+impl DocumentConfig {
+    /// Resolve {company_name} placeholder in footer_text
+    pub fn resolved_footer_text(&self) -> String {
+        self.company
+            .footer_text
+            .replace("{company_name}", &self.company.name)
+    }
+
+    /// Resolve {company_name} placeholder in author
+    pub fn resolved_author(&self) -> String {
+        self.company
+            .author
+            .replace("{company_name}", &self.company.name)
+    }
+
+    /// Resolve footer text with date appended
+    pub fn resolved_footer_with_date(&self, date: &str) -> String {
+        format!("{} \u{2014} {}", self.resolved_footer_text(), date)
+    }
+}
+
+/// Get XDG-style config directory: ~/.config/ai-workbench/
+pub(crate) fn get_config_dir() -> Option<std::path::PathBuf> {
+    // Use $XDG_CONFIG_HOME if set, otherwise ~/.config
+    if let Ok(xdg_config) = std::env::var("XDG_CONFIG_HOME") {
+        return Some(std::path::PathBuf::from(xdg_config).join("ai-workbench"));
+    }
+
+    // Fallback to ~/.config/ai-workbench
+    dirs::home_dir().map(|home| home.join(".config").join("ai-workbench"))
+}
+
+pub fn load_config() -> Result<Config> {
+    // 1. Check local config.yaml (project-specific override)
+    let local_config = Path::new("config.yaml");
+    if local_config.exists() {
+        let contents = fs::read_to_string(local_config)?;
+        let config: Config = serde_yaml_ng::from_str(&contents)?;
+        return Ok(config);
+    }
+
+    // 2. Check ~/.config/ai-workbench/config.yaml (XDG-style)
+    if let Some(config_dir) = get_config_dir() {
+        let config_path = config_dir.join("config.yaml");
+        if config_path.exists() {
+            let contents = fs::read_to_string(&config_path)?;
+            let config: Config = serde_yaml_ng::from_str(&contents)?;
+            return Ok(config);
+        }
+    }
+
+    // Fallback to default config
+    Ok(Config::default())
+}
+
+/// Set restrictive file permissions (0600 - owner read/write only) on Unix systems
+#[cfg(unix)]
+fn set_restrictive_permissions(path: &Path) -> Result<()> {
+    let mut perms = fs::metadata(path)?.permissions();
+    perms.set_mode(0o600);
+    fs::set_permissions(path, perms)?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_restrictive_permissions(_path: &Path) -> Result<()> {
+    // No-op on non-Unix systems (Windows handles permissions differently)
+    Ok(())
+}
+
+/// Save config - updates local config.yaml if it exists, otherwise XDG config
+pub fn save_config(config: &Config) -> Result<()> {
+    // If local config.yaml exists, update it (maintains project-specific settings)
+    let local_config = Path::new("config.yaml");
+    if local_config.exists() {
+        let yaml = serde_yaml_ng::to_string(config)?;
+        fs::write(local_config, &yaml)?;
+        set_restrictive_permissions(local_config)?;
+        return Ok(());
+    }
+
+    // Otherwise save to XDG config directory
+    if let Some(config_dir) = get_config_dir() {
+        let config_path = config_dir.join("config.yaml");
+        fs::create_dir_all(&config_dir)?;
+        let yaml = serde_yaml_ng::to_string(config)?;
+        fs::write(&config_path, &yaml)?;
+        set_restrictive_permissions(&config_path)?;
+    }
+    Ok(())
+}
+
+/// Get the config file path (for display purposes)
+pub fn get_config_path() -> Option<std::path::PathBuf> {
+    get_config_dir().map(|d| d.join("config.yaml"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_shell_path_is_nonempty() {
+        let s = default_shell_path();
+        assert!(!s.is_empty(), "default_shell_path() must not return empty");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn default_shell_path_windows_is_not_unix() {
+        let s = default_shell_path();
+        assert!(
+            !s.starts_with("/bin/"),
+            "On Windows the default shell must not be a Unix path, got: {s}"
+        );
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn default_shell_path_unix_is_absolute_or_shell_env() {
+        let s = default_shell_path();
+        let from_env = std::env::var("SHELL").ok();
+        let acceptable = s.starts_with('/') || from_env.as_deref() == Some(s.as_str());
+        assert!(
+            acceptable,
+            "On Unix default_shell_path() must be absolute or match $SHELL, got: {s}"
+        );
+    }
+
+    #[test]
+    fn config_default_terminal_shell_path_is_set() {
+        let cfg = Config::default();
+        assert!(!cfg.terminal.shell_path.is_empty());
+    }
+
+    #[test]
+    fn prefix_key_default_is_ctrl_b() {
+        assert_eq!(PtyConfig::default().prefix_key(), Some('b'));
+    }
+
+    #[test]
+    fn prefix_key_disabled_values_return_none() {
+        let mut c = PtyConfig::default();
+        c.terminal_prefix = String::new();
+        assert_eq!(c.prefix_key(), None);
+        c.terminal_prefix = "none".to_string();
+        assert_eq!(c.prefix_key(), None);
+    }
+
+    #[test]
+    fn prefix_key_is_case_insensitive_and_accepts_c_dash() {
+        let mut c = PtyConfig::default();
+        c.terminal_prefix = "Ctrl+A".to_string();
+        assert_eq!(c.prefix_key(), Some('a'));
+        c.terminal_prefix = "c-x".to_string();
+        assert_eq!(c.prefix_key(), Some('x'));
+    }
+
+    #[test]
+    fn prefix_key_rejects_malformed() {
+        let mut c = PtyConfig::default();
+        c.terminal_prefix = "ctrl+ab".to_string();
+        assert_eq!(c.prefix_key(), None);
+        c.terminal_prefix = "ctrl+1".to_string();
+        assert_eq!(c.prefix_key(), None);
+    }
+}

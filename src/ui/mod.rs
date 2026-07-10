@@ -1,0 +1,17 @@
+pub mod about;
+pub mod claude_startup;
+pub mod dialog;
+pub mod drag_ghost;
+pub mod file_browser;
+pub mod footer;
+pub mod fuzzy_finder;
+pub mod help;
+pub mod layout;
+pub mod menu;
+pub mod permission_mode;
+pub mod preview;
+pub mod settings;
+pub mod syntax;
+pub mod terminal_pane;
+pub mod update_dialog;
+pub mod wizard_ui;

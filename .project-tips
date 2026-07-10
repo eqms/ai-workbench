@@ -1,0 +1,17 @@
+# ai-workbench | Rust TUI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+▸ Run:       cargo run
+▸ Build:     cargo build --release
+▸ Test:      cargo test
+▸ Lint:      cargo clippy
+▸ Format:    cargo fmt
+▸ Install:   bash scripts/install.sh --local
+▸ Check:     bash scripts/install.sh --check
+▸ Docs:      USAGE.md | INSTALL.md | CLAUDE.md
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+▸ Git Push (Dual-Remote):
+  git push origin main      # GitLab
+  git push upstream main    # GitHub
+▸ Remotes:
+  origin   → gitlab.ownerp.io
+  upstream → github.com/eqms/ai-workbench
