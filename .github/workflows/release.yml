@@ -160,15 +160,41 @@ jobs:
         run: |
           PREV_TAG="${{ steps.prev_tag.outputs.prev_tag }}"
           CURRENT_TAG="${{ github.ref_name }}"
+          VERSION="${CURRENT_TAG#v}"
 
-          echo "Generating changelog from $PREV_TAG to $CURRENT_TAG"
+          echo "Building changelog for $CURRENT_TAG (version $VERSION)"
 
-          if [ -n "$PREV_TAG" ]; then
-            # Get commits between tags, format nicely
-            CHANGELOG=$(git log ${PREV_TAG}..${CURRENT_TAG} --pretty=format:"- %s" --no-merges | head -20)
-          else
-            # First release, get recent commits
-            CHANGELOG=$(git log --pretty=format:"- %s" --no-merges -10)
+          # Preferred source: the curated section from RELEASE_NOTES.md for this
+          # version. Captures everything between the "## Version X.Y.Z ..." header
+          # and the next "## Version" header (or EOF), then trims leading/trailing
+          # blank lines. This makes the GitHub Release body match the hand-written
+          # notes that also feed the in-app self-update dialog.
+          CHANGELOG=""
+          if [ -f RELEASE_NOTES.md ]; then
+            # Pure awk: capture the section, then print it trimmed of leading and
+            # trailing blank lines (portable — no GNU-only sed idioms).
+            CHANGELOG=$(awk -v ver="$VERSION" '
+              $0 ~ ("^## Version " ver "([^0-9.]|$)") { capture=1; next }
+              capture && /^## Version / { capture=0 }
+              capture { lines[n++] = $0 }
+              END {
+                last = -1
+                for (i = 0; i < n; i++) if (lines[i] ~ /[^ \t]/) last = i
+                first = 0
+                while (first < n && lines[first] !~ /[^ \t]/) first++
+                for (i = first; i <= last; i++) print lines[i]
+              }
+            ' RELEASE_NOTES.md)
+          fi
+
+          # Fallback: raw commit log between tags when no matching section exists.
+          if [ -z "$CHANGELOG" ]; then
+            echo "No RELEASE_NOTES.md section for $VERSION — falling back to git log"
+            if [ -n "$PREV_TAG" ]; then
+              CHANGELOG=$(git log ${PREV_TAG}..${CURRENT_TAG} --pretty=format:"- %s" --no-merges | head -20)
+            else
+              CHANGELOG=$(git log --pretty=format:"- %s" --no-merges -10)
+            fi
           fi
 
           # Escape for GitHub Actions multiline output

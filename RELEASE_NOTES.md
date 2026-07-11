@@ -1,5 +1,21 @@
 # Release Notes
 
+## Version 1.5.0 (11.07.2026)
+
+### Added
+
+- **[ADD] `F8` now opens an AI backend selection menu.** Instead of silently cycling Claude → OpenCode → Pi on each keypress, `F8` opens a modal that lists all three backends with the active one marked `← active`. `F8` or `↑↓`/`j k` move the highlight, `Enter` applies the switch (respawning the AI pane), `Esc` cancels without a change. Backed by the new `BackendSwitchState` (`src/ui/backend_switch.rs`) following the established `visible + selected` dialog pattern, wired through `keyboard/mod.rs` dispatch (before global shortcuts so `F8` cycles the highlight), a new `handle_backend_switch_key` handler, and `drawing.rs`/`mouse.rs` overlay handling. The footer gained an `F8 Backend` button (clickable) in the terminal and file-browser contexts. `Shift+F8` still opens Settings. 4 new unit tests.
+- **[ADD] Release helper `scripts/release.sh`.** Bumps `Cargo.toml` + `Cargo.lock`, drafts a `RELEASE_NOTES.md` section from the commit log (grouped by `[ADD]`/`[CHG]`/`[FIX]` prefixes), opens `$EDITOR` to finalize, then commits, tags and pushes both remotes (origin=GitLab, upstream=GitHub) after a confirmation prompt. Supports `--dry-run` and `--no-push`.
+
+### Changed
+
+- **[CHG] GitHub Release body now comes from `RELEASE_NOTES.md`.** The `release.yml` "Generate changelog" step extracts the curated section for the tag's version (pure portable `awk`, trimmed of blank lines) instead of a raw `git log` dump; it falls back to `git log` when no matching section exists. The published release now matches the hand-written notes.
+- **[CHG] Refreshed the README.** Replaced the old banner with the new `docs/ai_workbench.png` graphic and removed two pre-existing broken screenshot links. Stripped ~330 lines of embedded `What's New in vX.Y.Z` history (down to v0.59.0, inherited from claude-workbench) in favour of a short pointer to `RELEASE_NOTES.md`; rescued the still-relevant clipboard troubleshooting into `USAGE.md` (EN + DE). Removed the three obsolete PNGs from `docs/`.
+
+### Notes
+
+- Release-archive signing (zipsign, SEC-01) remains a documented follow-up in `SECURITY-NOTES.md`: it is blocked on generating the operator keypair, and client-side verification must wait until 2–3 signed releases have shipped to avoid bricking in-flight self-updates.
+
 ## Version 1.4.0 (11.07.2026)
 
 ### Added

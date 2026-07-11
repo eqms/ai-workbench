@@ -188,13 +188,14 @@ impl App {
             return true;
         }
 
-        // F8: cycle the AI backend (Claude → OpenCode → Pi). Shift+F8 opens
-        // Settings (moved off plain F8 so F8 can drive the backend switch).
+        // F8: open the AI backend selection menu (Claude / OpenCode / Pi).
+        // The menu shows the active backend and requires Enter to confirm the
+        // switch (see handle_backend_switch_key). Shift+F8 opens Settings.
         if key.code == KeyCode::F(8) {
             if key.modifiers.contains(KeyModifiers::SHIFT) {
                 self.settings.open(&self.config);
             } else {
-                self.cycle_ai_backend();
+                self.backend_switch.open(self.backend);
             }
             return true;
         }

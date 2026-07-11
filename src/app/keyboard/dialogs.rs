@@ -297,6 +297,23 @@ impl App {
         }
     }
 
+    /// Handle keys while the F8 backend-selection menu is open. F8/↓/j move the
+    /// highlight forward, ↑/k backward; Enter applies the highlighted backend
+    /// (respawning the AI pane); Esc cancels without switching.
+    pub(super) fn handle_backend_switch_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => self.backend_switch.close(),
+            KeyCode::Enter => {
+                let target = self.backend_switch.selected_backend();
+                self.backend_switch.close();
+                self.apply_ai_backend(target);
+            }
+            KeyCode::F(8) | KeyCode::Down | KeyCode::Char('j') => self.backend_switch.next(),
+            KeyCode::Up | KeyCode::Char('k') => self.backend_switch.prev(),
+            _ => {}
+        }
+    }
+
     pub(super) fn handle_help_key(&mut self, key: KeyEvent) {
         if self.help.search_active {
             match key.code {

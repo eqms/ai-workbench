@@ -108,6 +108,8 @@ pub struct App {
     pub claude_startup: ui::claude_startup::ClaudeStartupState,
     // Permission mode selection dialog
     pub permission_mode_dialog: ui::permission_mode::PermissionModeState,
+    // AI backend selection menu (F8)
+    pub backend_switch: ui::backend_switch::BackendSwitchState,
     // Selected Claude permission mode
     pub claude_permission_mode: ClaudePermissionMode,
     // Whether Claude PTY is pending (waiting for permission mode selection)
@@ -337,6 +339,7 @@ impl App {
             terminal_error,
             claude_startup: ui::claude_startup::ClaudeStartupState::default(),
             permission_mode_dialog,
+            backend_switch: ui::backend_switch::BackendSwitchState::default(),
             claude_permission_mode,
             claude_pty_pending,
             last_click_time: std::time::Instant::now(),

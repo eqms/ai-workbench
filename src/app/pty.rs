@@ -146,23 +146,23 @@ impl App {
         }
     }
 
-    /// Cycle the AI backend (Claude → OpenCode → Pi → Claude), persist the
-    /// choice to the session, and respawn the AI pane using the new backend.
-    /// Triggered by F8. The respawn reuses [`Self::init_claude_after_wizard`],
-    /// which shows the Claude startup dialog only when switching to Claude with
-    /// `show_permission_dialog` enabled, and otherwise starts the backend CLI
-    /// directly (OpenCode/Pi get their args from `config.pty.*_command`).
-    pub(super) fn cycle_ai_backend(&mut self) {
-        let next = self.backend.next();
-
-        self.backend = next;
-        self.session.last_backend = next;
+    /// Switch the AI backend to `target`, persist the choice to the session,
+    /// and respawn the AI pane using the new backend. Invoked from the F8
+    /// backend-selection menu on confirm (Enter). A switch to the already-active
+    /// backend still respawns the pane (acts as a restart). The respawn reuses
+    /// [`Self::init_claude_after_wizard`], which shows the Claude startup dialog
+    /// only when switching to Claude with `show_permission_dialog` enabled, and
+    /// otherwise starts the backend CLI directly (OpenCode/Pi get their args
+    /// from `config.pty.*_command`).
+    pub(super) fn apply_ai_backend(&mut self, target: crate::backend::AiBackend) {
+        self.backend = target;
+        self.session.last_backend = target;
         crate::session::save_session(&self.session);
 
         self.init_claude_after_wizard();
 
         // Footer confirmation (reuses the 2 s copy-flash channel).
-        self.copy_flash_message = Some(format!("Backend: {}", next.short_label()));
+        self.copy_flash_message = Some(format!("Backend: {}", target.short_label()));
         self.last_copy_time = Some(std::time::Instant::now());
     }
 

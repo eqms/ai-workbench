@@ -1,4 +1,5 @@
 pub mod about;
+pub mod backend_switch;
 pub mod claude_startup;
 pub mod dialog;
 pub mod drag_ghost;

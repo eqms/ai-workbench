@@ -104,12 +104,21 @@ impl App {
         if self.active_pane == PaneId::Terminal
             && !self.permission_mode_dialog.visible
             && !self.claude_startup.visible
+            && !self.backend_switch.visible
         {
             if let Some(prefix) = self.config.pty.prefix_key() {
                 if self.handle_terminal_passthrough(key, prefix) {
                     return;
                 }
             }
+        }
+
+        // Backend-switch menu (F8): while open, F8/↑↓/j/k move the highlight and
+        // Enter applies. Must run BEFORE global shortcuts so F8 cycles the
+        // selection instead of re-opening the menu (Esc cancels without switch).
+        if self.backend_switch.visible {
+            self.handle_backend_switch_key(key);
+            return;
         }
 
         // Global shortcuts (F12/F10/F7/?/F9 variants, Ctrl+P/O/X, Shift+F2, F8, Ctrl+Shift+W)

@@ -392,6 +392,12 @@ impl App {
                     return;
                 }
 
+                // Backend selection menu - click outside cancels (no switch)
+                if self.backend_switch.visible {
+                    self.backend_switch.close();
+                    return;
+                }
+
                 // Permission mode dialog - click outside uses default mode
                 // Skip if update dialog is visible - update takes priority
                 if self.permission_mode_dialog.visible && !self.update_state.show_dialog {
@@ -874,6 +880,9 @@ impl App {
                                         self.copy_last_lines_to_clipboard();
                                     }
                                 }
+                                FooterAction::SwitchBackend => {
+                                    self.backend_switch.open(self.backend);
+                                }
                                 FooterAction::ToggleAutosave => {
                                     self.config.ui.autosave = !self.config.ui.autosave;
                                     let _ = crate::config::save_config(&self.config);
@@ -894,6 +903,7 @@ impl App {
                     || self.dialog.is_active()
                     || self.fuzzy_finder.visible
                     || self.permission_mode_dialog.visible
+                    || self.backend_switch.visible
                     || self.claude_startup.visible
                     || self.wizard.visible
                     || self.menu.visible
@@ -974,6 +984,7 @@ impl App {
                     || self.dialog.is_active()
                     || self.fuzzy_finder.visible
                     || self.permission_mode_dialog.visible
+                    || self.backend_switch.visible
                     || self.claude_startup.visible
                     || self.wizard.visible
                     || self.menu.visible
@@ -1043,6 +1054,7 @@ impl App {
                     || self.dialog.is_active()
                     || self.fuzzy_finder.visible
                     || self.permission_mode_dialog.visible
+                    || self.backend_switch.visible
                     || self.claude_startup.visible
                     || self.wizard.visible
                     || self.menu.visible
@@ -1107,6 +1119,7 @@ impl App {
                     || self.dialog.is_active()
                     || self.fuzzy_finder.visible
                     || self.permission_mode_dialog.visible
+                    || self.backend_switch.visible
                     || self.claude_startup.visible
                     || self.wizard.visible
                     || self.menu.visible

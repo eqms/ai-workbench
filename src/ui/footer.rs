@@ -19,6 +19,7 @@ pub enum FooterAction {
     ToggleGit,       // F5
     ToggleTerm,      // F6
     FileMenu,        // F9
+    SwitchBackend,   // F8 - open AI backend selection menu
     FuzzyFind,       // ^P
     OpenFile,        // o
     OpenFinder,      // O
@@ -213,6 +214,7 @@ pub fn get_context_button_positions(
             ("F4", ai_label, FooterAction::FocusClaude),
             ("F5", "Git", FooterAction::ToggleGit),
             ("F6", "Term", FooterAction::ToggleTerm),
+            ("F8", "Backend", FooterAction::SwitchBackend),
             ("F9/\u{21e7}9", "Copy", FooterAction::CopyLastLines),
             ("^P", "Find", FooterAction::FuzzyFind),
             ("F12", "Help", FooterAction::Help),
@@ -225,6 +227,7 @@ pub fn get_context_button_positions(
             ("F4", ai_label, FooterAction::FocusClaude),
             ("F5", "Git", FooterAction::ToggleGit),
             ("F6", "Term", FooterAction::ToggleTerm),
+            ("F8", "Backend", FooterAction::SwitchBackend),
             ("F9", "Menu", FooterAction::FileMenu),
             ("^P", "Find", FooterAction::FuzzyFind),
             ("F12", "Help", FooterAction::Help),
@@ -308,6 +311,7 @@ impl Widget for Footer {
                 ("F4", self.ai_label),
                 ("F5", "Git"),
                 ("F6", "Term"),
+                ("F8", "Backend"),
                 ("F9/\u{21e7}9", "Copy"),
                 ("^P", "Find"),
                 ("F12", "Help"),
@@ -320,6 +324,7 @@ impl Widget for Footer {
                 ("F4", self.ai_label),
                 ("F5", "Git"),
                 ("F6", "Term"),
+                ("F8", "Backend"),
                 ("F9", "Menu"),
                 ("^O", "OpenMD"),
                 ("\u{21e7}F2", "Editor"),

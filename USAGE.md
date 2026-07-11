@@ -26,7 +26,7 @@
 | F5 | Toggle LazyGit (restarts in current directory) |
 | F6 | Toggle User Terminal (syncs to current directory) |
 | F7 | Claude Settings (~/.claude) |
-| F8 | Switch AI backend (Claude → OpenCode → Pi), respawns the AI pane |
+| F8 | Open the AI backend menu — a modal lists Claude / OpenCode / Pi with the active one marked. F8 or ↑↓/j k move the highlight, Enter switches (respawns the AI pane), Esc cancels |
 | Shift+F8 | Settings |
 | F9 | File Menu (File Browser) / Copy last command block (Terminal) or last N lines (Claude, LazyGit) |
 | Shift+F9 | Copy last N lines with interactive count input (Terminal panes) |
@@ -320,7 +320,7 @@ image paste to work.
   one-time yellow footer hint pointing here.
 - The wizard (first run) shows an SSH-specific step with detection status
   and setup instructions when started over SSH.
-- Settings (F8) → SSH lets you toggle the feature, override the helper
+- Settings (Shift+F8) → SSH lets you toggle the feature, override the helper
   path, or reset the dismissed-hint flag.
 
 ### Remote Export & Preview (SSH)
@@ -363,6 +363,27 @@ Reports SSH state, the detected terminal capability, the raw environment
 markers, the effective export directory, and the configured mode. Note: under
 tmux you also need `set -g allow-passthrough on` (tmux ≥ 3.3).
 
+### Clipboard Troubleshooting (Debian / Xfce / Kitty / XRDP)
+
+The clipboard uses a fallback chain: `arboard` → `xclip` → `xsel` → `wl-copy` →
+OSC 52 (copy) and `arboard` → `xclip -o` → `xsel -b -o` → `wl-paste` (paste). On
+Linux without any helper installed, a yellow footer banner warns you at launch.
+
+```bash
+sudo apt install xclip xsel xfce4-clipman-plugin
+pgrep -af xrdp-chansrv      # must be running (default with xrdp)
+# ~/.config/kitty/kitty.conf:
+clipboard_control write-clipboard write-primary read-clipboard read-primary no-append
+```
+
+With `xclip` installed, the app picks the `SubprocessFirst` strategy automatically
+and writes directly into the X11 selection — exactly the path `xrdp-chansrv` syncs
+to the RDP channel. Use **F11 Universal Paste** to bypass Kitty's bracketed-paste
+bridge when it cannot read the system clipboard under XRDP. Run
+`ai-workbench --clipboard-diag` to print the active strategy, helper paths,
+relevant environment variables, and a copy/paste roundtrip test. Override the
+strategy with `CLAUDE_WORKBENCH_CLIPBOARD=osc52|arboard|subprocess`.
+
 ---
 
 <a name="deutsch"></a>
@@ -387,7 +408,7 @@ tmux you also need `set -g allow-passthrough on` (tmux ≥ 3.3).
 | F5 | LazyGit umschalten (startet im aktuellen Verzeichnis neu) |
 | F6 | Benutzer-Terminal umschalten (wechselt ins aktuelle Verzeichnis) |
 | F7 | Claude Einstellungen (~/.claude) |
-| F8 | KI-Backend wechseln (Claude → OpenCode → Pi), startet den KI-Bereich neu |
+| F8 | KI-Backend-Menü öffnen — ein Dialog listet Claude / OpenCode / Pi, das aktive ist markiert. F8 oder ↑↓/j k bewegen die Auswahl, Enter wechselt (startet den KI-Bereich neu), Esc bricht ab |
 | Shift+F8 | Einstellungen |
 | F9 | Datei-Menü (Dateibrowser) / Letzten Kommando-Block (Terminal) bzw. letzte N Zeilen (Claude, LazyGit) kopieren |
 | Shift+F9 | Letzte N Zeilen mit interaktiver Eingabe kopieren (Terminal-Bereiche) |
@@ -687,7 +708,7 @@ grün sein, damit Bild-Paste funktioniert.
   ein einmaliger gelber Footer-Hinweis mit Verweis auf diese Doku.
 - Der Setup-Wizard (Erststart) zeigt einen SSH-spezifischen Schritt mit
   Detection-Status und Setup-Anleitung, sofern er über SSH läuft.
-- Einstellungen (F8) → SSH erlauben das Feature zu deaktivieren, den
+- Einstellungen (Shift+F8) → SSH erlauben das Feature zu deaktivieren, den
   Helper-Pfad zu überschreiben oder den Hinweis-Status zurückzusetzen.
 
 ### Remote-Export & -Vorschau (SSH)
@@ -732,3 +753,25 @@ ai-workbench --open-diag
 Meldet SSH-Status, erkannte Terminal-Capability, die rohen Environment-Marker,
 das effektive Export-Verzeichnis und den konfigurierten Modus. Hinweis: Unter
 tmux zusätzlich `set -g allow-passthrough on` (tmux ≥ 3.3) nötig.
+
+### Clipboard-Fehlerbehebung (Debian / Xfce / Kitty / XRDP)
+
+Die Zwischenablage nutzt eine Fallback-Kette: `arboard` → `xclip` → `xsel` →
+`wl-copy` → OSC 52 (Kopieren) bzw. `arboard` → `xclip -o` → `xsel -b -o` →
+`wl-paste` (Einfügen). Auf Linux ohne installierten Helfer warnt beim Start ein
+gelbes Footer-Banner.
+
+```bash
+sudo apt install xclip xsel xfce4-clipman-plugin
+pgrep -af xrdp-chansrv      # muss laufen (Standard bei xrdp)
+# ~/.config/kitty/kitty.conf:
+clipboard_control write-clipboard write-primary read-clipboard read-primary no-append
+```
+
+Mit installiertem `xclip` wählt die App automatisch die `SubprocessFirst`-Strategie
+und schreibt direkt in die X11-Selection — genau den Pfad, den `xrdp-chansrv` in
+den RDP-Kanal spiegelt. **F11 Universal Paste** umgeht Kittys Bracketed-Paste-Brücke,
+wenn diese unter XRDP das System-Clipboard nicht lesen kann. `ai-workbench
+--clipboard-diag` zeigt die aktive Strategie, Helfer-Pfade, relevante Umgebungs-
+variablen und einen Copy/Paste-Roundtrip-Test. Strategie überschreibbar via
+`CLAUDE_WORKBENCH_CLIPBOARD=osc52|arboard|subprocess`.
