@@ -1,6 +1,6 @@
 [package]
 name = "ai-workbench"
-version = "1.5.0"
+version = "1.6.0"
 edition = "2021"
 rust-version = "1.85"
 description = "A Rust TUI multiplexer for AI coding agents (Claude, OpenCode, Pi) with file browser, preview and embedded PTY panes"

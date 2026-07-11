@@ -147,6 +147,51 @@ jobs:
           find artifacts -type f -exec mv {} release/ \;
           ls -la release/
 
+      # Sign release archives with the ed25519 signing key (zipsign). The
+      # signature is embedded in the archive (no sidecar); a signed .tar.gz/.zip
+      # still extracts normally, so clients that do not yet verify keep working.
+      # Client-side verification (self_update .verifying_keys) is a later,
+      # separate change — see SECURITY-NOTES.md (SEC-01 rollout order).
+      - name: Install Rust toolchain (for zipsign)
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+      - name: Cache cargo (zipsign)
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: zipsign
+      - name: Install zipsign
+        run: cargo install zipsign --version 0.2.1 --locked
+      - name: Sign release archives
+        env:
+          ZIPSIGN_KEY_B64: ${{ secrets.ZIPSIGN_PRIVATE_KEY }}
+        run: |
+          if [ -z "$ZIPSIGN_KEY_B64" ]; then
+            echo "::warning::ZIPSIGN_PRIVATE_KEY not set — publishing UNSIGNED archives"
+            exit 0
+          fi
+          echo "$ZIPSIGN_KEY_B64" | base64 -d > /tmp/zipsign-key.bin
+          for f in release/*.tar.gz; do
+            [ -e "$f" ] || continue
+            echo "Signing (tar) $f"
+            zipsign sign tar "$f" /tmp/zipsign-key.bin
+          done
+          for f in release/*.zip; do
+            [ -e "$f" ] || continue
+            echo "Signing (zip) $f"
+            zipsign sign zip "$f" /tmp/zipsign-key.bin
+          done
+          rm -f /tmp/zipsign-key.bin
+          echo "Verifying signatures against the committed public key…"
+          for f in release/*.tar.gz; do
+            [ -e "$f" ] || continue
+            zipsign verify tar "$f" signing/ai-workbench-pub.bin
+          done
+          for f in release/*.zip; do
+            [ -e "$f" ] || continue
+            zipsign verify zip "$f" signing/ai-workbench-pub.bin
+          done
+          echo "All archives signed and verified."
+          ls -la release/
+
       - name: Get previous tag
         id: prev_tag
         run: |

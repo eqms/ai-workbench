@@ -3,7 +3,12 @@
 Operational security playbook for ai-workbench. This file tracks the
 findings of the project audit and the remediation plan for each.
 
-## Self-Update Supply-Chain Hardening (HIGH — open)
+## Self-Update Supply-Chain Hardening (HIGH — Half 1 landed v1.6.0, Half 2 open)
+
+**Status update (v1.6.0, 11.07.2026):** Half 1 (CI signing) is now live — the
+release workflow signs every archive with zipsign and verifies it against the
+committed public key. Half 2 (client-side `.verifying_keys()`) remains open and
+is gated on 2–3 signed releases shipping first (see Rollout Order below).
 
 **Finding** (audit 2026-05-11): `src/update/install.rs` uses
 `self_update::backends::github::Update` with default configuration. Downloads
@@ -43,34 +48,29 @@ steps remain in the Remediation Plan below.
 
 The fix has two halves, both required:
 
-#### Half 1: Sign release archives in CI
+#### Half 1: Sign release archives in CI — ✅ DONE (v1.6.0)
 
-In `.github/workflows/release.yml`, before the `gh release upload` step:
+Implemented in `.github/workflows/release.yml` (release job, after "Prepare
+release assets"). For the record, the actual setup that shipped:
 
-1. Generate an ed25519 signing keypair **once**, on a developer workstation:
+1. Generated an ed25519 keypair once with zipsign 0.2.1 (note the real CLI is
+   positional, not the `--pubkey/--privkey` flags an older doc assumed):
    ```bash
-   # Use zipsign (matches self_update's `signatures` feature) or minisign.
    cargo install zipsign
-   zipsign generate-keys --pubkey ai-workbench-pub.bin --privkey ai-workbench-priv.bin
+   zipsign gen-key ai-workbench-priv.bin ai-workbench-pub.bin
    ```
-2. Store `ai-workbench-priv.bin` as a base64-encoded GitHub Actions
-   secret (e.g. `ZIPSIGN_PRIVATE_KEY`). Never commit the private key.
-3. Commit `ai-workbench-pub.bin` to the repository at
-   `signing/ai-workbench-pub.bin`.
-4. In the release workflow, after building the platform archives:
-   ```yaml
-   - name: Sign archives
-     env:
-       ZIPSIGN_KEY_B64: ${{ secrets.ZIPSIGN_PRIVATE_KEY }}
-     run: |
-       echo "$ZIPSIGN_KEY_B64" | base64 -d > /tmp/key.bin
-       for f in dist/ai-workbench-*.tar.gz dist/ai-workbench-*.zip; do
-         zipsign sign tar /tmp/key.bin "$f"
-       done
-       rm -f /tmp/key.bin
+2. `ai-workbench-priv.bin` is stored **base64-encoded** as the GitHub Actions
+   secret `ZIPSIGN_PRIVATE_KEY` (never committed).
+3. `ai-workbench-pub.bin` is committed at `signing/ai-workbench-pub.bin`.
+4. The workflow signs each archive **in place** (signature embedded, no
+   sidecar) and then verifies it against the committed public key:
+   ```bash
+   zipsign sign tar release/<archive>.tar.gz /tmp/zipsign-key.bin
+   zipsign sign zip release/<archive>.zip  /tmp/zipsign-key.bin
+   zipsign verify tar release/<archive>.tar.gz signing/ai-workbench-pub.bin
    ```
-5. Upload both the archive **and** the corresponding `.sig` sidecar file to
-   the release.
+   A signed `.tar.gz`/`.zip` still extracts normally, so clients that do not
+   yet verify keep updating. No `.sig` sidecar is produced or needed.
 
 #### Half 2: Verify signatures in the client
 

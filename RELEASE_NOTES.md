@@ -1,5 +1,11 @@
 # Release Notes
 
+## Version 1.6.0 (11.07.2026)
+
+### Added
+
+- **[ADD] Release archives are now cryptographically signed (zipsign, SEC-01 Half 1).** The `release.yml` workflow signs every `.tar.gz`/`.zip` with an ed25519 key before publishing (signature embedded in the archive — no sidecar, signed archives still extract normally) and verifies each one against the committed public key `signing/ai-workbench-pub.bin` in CI. The private key lives only as the `ZIPSIGN_PRIVATE_KEY` GitHub Actions secret. **Client-side verification is intentionally NOT enabled yet** — per the SECURITY-NOTES.md rollout order, the next 2–3 releases ship signed first so existing self-updates keep working; enabling `self_update`'s `.verifying_keys()` (Half 2) will be a later major release.
+
 ## Version 1.5.0 (11.07.2026)
 
 ### Added
