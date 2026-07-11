@@ -246,6 +246,12 @@ impl App {
 
         // Render drag ghost on top of everything
         ui::drag_ghost::render(frame, &self.drag_state);
+
+        // Startup intro animation — topmost overlay, covers all panes and the
+        // (possibly already-open) wizard until it auto-dismisses (~1.5 s).
+        if self.intro.visible {
+            ui::intro::render(frame, area, &self.intro);
+        }
     }
 }
 

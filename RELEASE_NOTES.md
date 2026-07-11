@@ -1,5 +1,27 @@
 # Release Notes
 
+## Version 1.3.0 (11.07.2026)
+
+### Added
+
+- **[ADD] Startup-Intro „Cyberpunk Glitch & Scanline Reveal".** Beim App-Start
+  erscheint jetzt ein „AI WORKBENCH"-Block-Logo, das zunächst geglitcht aufflackert
+  (zufällige Zeilen-Offsets, korrumpierte Zeichen aus `@ # $ % & ░ ▒ ▓ █`), dann von
+  einer hellen Cyan-Scanline von oben nach unten „repariert" wird und schließlich in
+  den Branding-Farben stabilisiert — eine ~4,5 s lange Enthüllung (Glitch 0,9 s +
+  Sweep 2,4 s + Stabilisierung 1,2 s). Rein zeitgesteuert über `Instant::elapsed()`
+  (keine neue Dependency; der Glitch-Zufall stammt aus einem winzigen inline-
+  xorshift-PRNG). Umgesetzt als neues Modul `src/ui/intro.rs` mit `IntroState`,
+  gerendert als oberstes Vollbild-Overlay in `drawing.rs`, während Panes/PTYs
+  dahinter unverändert starten — der 16-ms-Render-Loop liefert die Frames ohne
+  zusätzliche Tick-Infrastruktur. Beliebige Taste oder Klick überspringt sofort
+  (Skip-Hooks in `keyboard/mod.rs` und `mouse.rs`); Auto-Dismiss nach Ablauf via
+  `IntroState::tick()` im Event-Loop. Abschaltbar über neues Config-Feld
+  `ui.intro_animation: bool` (Default `true`, rückwärtskompatibel via
+  `#[serde(default = "default_true")]`). Kleine Terminals (< 70 Spalten) fallen auf
+  einen kompakten gestylten Schriftzug zurück. 8 neue Unit-Tests (Phasen-Grenzen,
+  PRNG-Determinismus, Banner-Breite, Render-Smoke-Test über mehrere Größen inkl. 1×1).
+
 ## Version 1.0.2 (11.07.2026)
 
 ### Fixed

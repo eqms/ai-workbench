@@ -341,10 +341,15 @@ is instead **streamed to your local Mac terminal**:
 ```yaml
 ui:
   remote_transfer: auto   # auto | off | iterm2 | wezterm
+  intro_animation: true   # startup "Glitch & Scanline Reveal" intro (set false to skip)
 ```
 
 `auto` detects the terminal; `off` never transfers (keep on server); force
 `iterm2`/`wezterm` when tmux/SSH strips the `TERM_PROGRAM` marker.
+
+`intro_animation` plays a ~4.5 s cyberpunk glitch/scanline reveal of the
+"AI WORKBENCH" logo at startup. Press any key or click to skip it; set to
+`false` to disable it entirely (e.g. on slow or headless systems).
 
 **Verification:**
 
@@ -702,11 +707,17 @@ die Datei bei einer SSH-Session stattdessen **an dein lokales Mac-Terminal
 ```yaml
 ui:
   remote_transfer: auto   # auto | off | iterm2 | wezterm
+  intro_animation: true   # Startup-Intro „Glitch & Scanline Reveal" (false = überspringen)
 ```
 
 `auto` erkennt das Terminal; `off` überträgt nie (Datei bleibt am Server);
 `iterm2`/`wezterm` erzwingen, falls tmux/SSH den `TERM_PROGRAM`-Marker
 verschluckt.
+
+`intro_animation` spielt beim Start eine ~4,5 s lange Cyberpunk-Glitch-/
+Scanline-Enthüllung des „AI WORKBENCH"-Logos. Beliebige Taste oder Klick
+überspringt sie; `false` deaktiviert sie komplett (z. B. auf langsamen oder
+Headless-Systemen).
 
 **Verifikation:**
 

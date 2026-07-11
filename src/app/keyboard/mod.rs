@@ -27,6 +27,13 @@ impl App {
             return;
         }
 
+        // Startup intro animation: any key skips it and is swallowed (not
+        // forwarded to panes/handlers). The next keypress behaves normally.
+        if self.intro.visible {
+            self.intro.dismiss();
+            return;
+        }
+
         // Fuzzy finder handling (highest priority)
         if self.fuzzy_finder.visible {
             self.handle_fuzzy_finder_key(key);

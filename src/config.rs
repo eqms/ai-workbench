@@ -291,6 +291,10 @@ pub struct UiConfig {
     /// tmux/SSH stripping `TERM_PROGRAM`).
     #[serde(default = "default_remote_transfer")]
     pub remote_transfer: String,
+    /// Play the "Cyberpunk Glitch & Scanline Reveal" intro animation at startup.
+    /// Set to `false` to skip it entirely (e.g. on slow/headless systems).
+    #[serde(default = "default_true")]
+    pub intro_animation: bool,
 }
 
 fn default_remote_transfer() -> String {
@@ -353,6 +357,7 @@ impl Default for Config {
                 external_editor: String::new(),
                 export_dir: String::new(),
                 remote_transfer: default_remote_transfer(),
+                intro_animation: true,
             },
             layout: LayoutConfig::default(),
             file_browser: FileBrowserConfig::default(),

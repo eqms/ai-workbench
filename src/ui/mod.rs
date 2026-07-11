@@ -6,6 +6,7 @@ pub mod file_browser;
 pub mod footer;
 pub mod fuzzy_finder;
 pub mod help;
+pub mod intro;
 pub mod layout;
 pub mod menu;
 pub mod permission_mode;

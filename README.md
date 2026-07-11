@@ -125,6 +125,10 @@ cd ai-workbench && cargo build --release
 
 **See [USAGE.md](USAGE.md) for complete keyboard shortcuts and detailed usage guide.**
 
+### What's New in v1.3.0
+
+- **Cyberpunk startup intro — "Glitch & Scanline Reveal".** On launch, an "AI WORKBENCH" block logo now flickers with glitch corruption, a bright cyan scanline sweeps top-to-bottom "repairing" it, and it stabilizes in the branding colors — a ~4.5 s reveal that gives the app a dynamic, high-tech feel. Purely time-driven (no extra dependency; glitch randomness comes from a tiny inline xorshift PRNG), rendered as a full-screen overlay while the panes/PTYs spawn behind it. Press any key or click to skip; disable entirely with `ui.intro_animation: false`. Small terminals fall back to a compact styled wordmark.
+
 ### What's New in v1.2.0
 
 - **Remote export/preview no longer corrupts the terminal over SSH.** When ai-workbench runs on a remote Linux host, pressing `o` (browser preview) or exporting via `Ctrl+X` (Markdown/PDF) used to run `xdg-open` on the *server* — with no display that falls back to a console browser which hijacks the TUI and fills the screen with garbage. On an SSH session the file is now streamed to your local Mac terminal via iTerm2's OSC 1337 "File Download" escape (also supported by WezTerm), landing in `~/Downloads` over the existing SSH connection — no daemon, no port forwarding. Large PDFs use the multipart protocol. Terminals without transfer support (Terminus/Tabby, plain xterm, Kitty) leave the file on the server and show its path in the footer — the TUI is never corrupted. New `ui.remote_transfer` config (`auto`/`off`/`iterm2`/`wezterm`) and `--open-diag` CLI for diagnostics. All file-open subprocesses now detach their standard streams as a second line of defense.
@@ -308,6 +312,7 @@ terminal:
 
 ui:
   theme: "default"
+  intro_animation: true   # startup Glitch & Scanline Reveal intro (false to skip)
 
 layout:
   claude_height_percent: 40
@@ -646,6 +651,7 @@ terminal:
 
 ui:
   theme: "default"
+  intro_animation: true   # startup Glitch & Scanline Reveal intro (false to skip)
 
 layout:
   claude_height_percent: 40

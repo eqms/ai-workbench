@@ -283,6 +283,14 @@ impl App {
 
     /// Handle all mouse events. Layout rects are pre-computed by the caller.
     pub(super) fn handle_mouse_event(&mut self, mouse: MouseEvent, rects: super::LayoutRects) {
+        // Startup intro: swallow all mouse events; a button press skips it.
+        if self.intro.visible {
+            if let MouseEventKind::Down(_) = mouse.kind {
+                self.intro.dismiss();
+            }
+            return;
+        }
+
         let files = rects.files;
         let preview = rects.preview;
         let claude = rects.claude;

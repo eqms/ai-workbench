@@ -96,6 +96,8 @@ pub struct App {
     pub wizard: WizardState,
     pub settings: SettingsState,
     pub about: AboutState,
+    // Startup intro animation ("Cyberpunk Glitch & Scanline Reveal")
+    pub intro: ui::intro::IntroState,
     // PTY error tracking (shown as red border + message inside pane)
     pub claude_error: Option<String>,
     pub claude_command_used: String,
@@ -301,6 +303,7 @@ impl App {
         let show_terminal = config.ui.show_terminal;
         let show_lazygit = config.ui.show_lazygit;
         let show_preview = config.ui.show_preview;
+        let intro_enabled = config.ui.intro_animation;
 
         let mut app = Self {
             config,
@@ -328,6 +331,7 @@ impl App {
             wizard: WizardState::new(),
             settings: SettingsState::new(),
             about: AboutState::default(),
+            intro: ui::intro::IntroState::new(intro_enabled),
             claude_error,
             claude_command_used: claude_command_str,
             lazygit_error,
@@ -473,6 +477,9 @@ impl App {
 
             // Drain clipboard worker outcomes (footer flash on Failed)
             self.poll_clipboard_outcome();
+
+            // Auto-dismiss the startup intro once its duration has elapsed.
+            self.intro.tick();
 
             terminal.draw(|frame| self.draw(frame))?;
 
