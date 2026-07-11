@@ -67,13 +67,21 @@ impl ClaudePermissionMode {
     }
 }
 
-/// Claude Code model selection for --model flag
+/// Claude Code model selection for `--model`.
+///
+/// The variants map to the CLI's model *aliases* (`fable`/`opus`/`sonnet`/
+/// `haiku`) rather than pinned version IDs. Aliases always resolve to the
+/// newest model of each tier, so this list never goes stale when a new
+/// generation ships — which is also why the labels carry no version number
+/// (we cannot determine the concrete version without querying the CLI/API).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ClaudeModel {
     #[default]
     Unset,
-    Sonnet,
+    Fable,
     Opus,
+    Sonnet,
+    Haiku,
 }
 
 impl ClaudeModel {
@@ -81,8 +89,10 @@ impl ClaudeModel {
     pub fn cli_flag(&self) -> Option<&'static str> {
         match self {
             Self::Unset => None,
-            Self::Sonnet => Some("sonnet"),
+            Self::Fable => Some("fable"),
             Self::Opus => Some("opus"),
+            Self::Sonnet => Some("sonnet"),
+            Self::Haiku => Some("haiku"),
         }
     }
 
@@ -90,8 +100,10 @@ impl ClaudeModel {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Unset => "CLI-Default",
-            Self::Sonnet => "sonnet",
-            Self::Opus => "opus",
+            Self::Fable => "Fable",
+            Self::Opus => "Opus",
+            Self::Sonnet => "Sonnet",
+            Self::Haiku => "Haiku",
         }
     }
 
@@ -99,14 +111,22 @@ impl ClaudeModel {
     pub fn description_de(&self) -> &'static str {
         match self {
             Self::Unset => "ohne --model Flag (Claude-Default)",
-            Self::Sonnet => "Claude Sonnet",
-            Self::Opus => "Claude Opus",
+            Self::Fable => "Alias --model fable (immer neueste Version)",
+            Self::Opus => "Alias --model opus (immer neueste Version)",
+            Self::Sonnet => "Alias --model sonnet (immer neueste Version)",
+            Self::Haiku => "Alias --model haiku (immer neueste Version)",
         }
     }
 
     /// Get all available models
     pub fn all() -> &'static [Self] {
-        &[Self::Unset, Self::Sonnet, Self::Opus]
+        &[
+            Self::Unset,
+            Self::Fable,
+            Self::Opus,
+            Self::Sonnet,
+            Self::Haiku,
+        ]
     }
 }
 
@@ -1098,15 +1118,19 @@ mod tests {
     #[test]
     fn test_model_cli_flag() {
         assert_eq!(ClaudeModel::Unset.cli_flag(), None);
-        assert_eq!(ClaudeModel::Sonnet.cli_flag(), Some("sonnet"));
+        assert_eq!(ClaudeModel::Fable.cli_flag(), Some("fable"));
         assert_eq!(ClaudeModel::Opus.cli_flag(), Some("opus"));
+        assert_eq!(ClaudeModel::Sonnet.cli_flag(), Some("sonnet"));
+        assert_eq!(ClaudeModel::Haiku.cli_flag(), Some("haiku"));
     }
 
     #[test]
     fn test_model_all_contains_all_variants() {
         let all = ClaudeModel::all();
-        assert_eq!(all.len(), 3);
+        assert_eq!(all.len(), 5);
         assert_eq!(all[0], ClaudeModel::Unset);
+        // Aliases resolve to the newest generation; labels carry no version.
+        assert_eq!(all[1], ClaudeModel::Fable);
     }
 
     #[test]

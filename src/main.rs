@@ -506,9 +506,11 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
         .unwrap_or(session.last_backend);
 
     // Persist the resolved backend so a subsequent argument-less run resumes it.
+    // Preserve the daily-update timestamp — App::new updates it when it runs.
     save_session(&SessionState {
         last_cwd: session.last_cwd.clone(),
         last_backend: backend,
+        last_claude_update: session.last_claude_update.clone(),
     });
 
     {

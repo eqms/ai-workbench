@@ -1,5 +1,48 @@
 # Release Notes
 
+## Version 1.4.0 (11.07.2026)
+
+### Added
+
+- **[ADD] Transparentes tägliches `claude update` im Hintergrund.** Beim ersten
+  Start pro Kalendertag startet ai-workbench `claude update` als **detachten
+  Hintergrundprozess** — vollständig transparent: nichts im TUI, Output geht in
+  die Update-Logdatei (`…/ai-workbench/update.log`). Der „schon heute
+  gelaufen"-Marker liegt in `session.yaml` (`last_claude_update`, `YYYY-MM-DD`).
+  Läuft unabhängig vom aktiven Backend, sofern ein `claude`-Binary auf `$PATH`
+  auffindbar ist; nicht-blockierend (Kind wird nie abgewartet). Abschaltbar über
+  `claude.daily_update: false` (Default `true`). Neues Modul
+  `src/app/daily_claude.rs`, Datums-Key via `footer::today_key()`.
+- **[ADD] F8 wechselt das KI-Backend zur Laufzeit.** `F8` rotiert den KI-Bereich
+  durch Claude → OpenCode → Pi (`AiBackend::next()`), startet das AI-Pane über
+  `cycle_ai_backend()` neu (via `init_claude_after_wizard()`, respektiert den
+  Claude-Startup-Dialog bzw. startet OpenCode/Pi direkt) und persistiert die Wahl
+  in `session.yaml`. Footer zeigt kurz `✓ Backend: …`. Backend-Wechsel schluckt
+  keine bestehende Funktionalität — Pane-Titel und Footer-Label aktualisieren sich
+  automatisch.
+- **[ADD] OpenCode/Pi-Startoptionen in den Settings editierbar.** Die OpenCode- und
+  Pi-Kommandozeilen nehmen jetzt volle Argumente auf (z. B.
+  `opencode --model glm-5.2:cloud`) und sind unter **Settings (Shift+F8) → Paths**
+  („OpenCode Command" / „Pi Command") editierbar sowie über
+  `pty.opencode_command` / `pty.pi_command` in der `config.yaml`. Parsing via
+  `shlex` mit Fallback auf das nackte Binary bei leerer/ungültiger Eingabe.
+
+### Changed
+
+- **[CHG] Settings von F8 auf Shift+F8 verschoben**, damit `F8` den Backend-Wechsel
+  antreibt (bewährtes F-Taste-+-Modifier-Muster wie Shift+F2/Shift+F9).
+- **[CHG] Claude-Model-Auswahl auf Fable/Opus/Sonnet/Haiku** (+ CLI-Default)
+  erneuert. Die Optionen bilden die CLI-`--model`-Aliase ab und zeigen immer auf
+  die neueste Version der jeweiligen Stufe — bewusst ohne feste Versionsnummer im
+  Label, da diese ohne CLI-/API-Abfrage nicht zuverlässig ermittelbar ist.
+
+### Removed
+
+- **[CHG] Remote Control entfernt** aus dem Claude-Startup-Dialog, dem
+  `--remote-control`-Flag-Pfad und der Config (`claude.remote_control` existiert
+  nicht mehr). Bestehende `config.yaml`-Dateien laden weiterhin — der unbekannte
+  Key wird ignoriert.
+
 ## Version 1.3.0 (11.07.2026)
 
 ### Added

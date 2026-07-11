@@ -68,8 +68,14 @@ ai-workbench pi         # Pi CLI
 
 - The backend name is case-insensitive; an unknown value exits with an error.
 - Without an argument, the **last-used backend is resumed** (first-run default: `claude`), persisted to `~/.config/ai-workbench/session.yaml`.
-- Each backend's command is configurable via `pty.claude_command` / `pty.opencode_command` / `pty.pi_command`.
-- Claude-specific flags (permission mode, model, effort, session, worktree, remote-control) and the permission/startup dialogs apply **only** in Claude mode.
+- **Switch the backend at runtime with `F8`** — it cycles Claude → OpenCode → Pi, respawns the AI pane, and persists the choice. (`Shift+F8` opens Settings.)
+- Each backend's command is configurable via `pty.claude_command` / `pty.opencode_command` / `pty.pi_command`. The **OpenCode** and **Pi** commands take a full command line with arguments — e.g. `opencode --model glm-5.2:cloud` — and are editable in **Settings (Shift+F8) → Paths** ("OpenCode Command" / "Pi Command") as well as in `config.yaml`:
+  ```yaml
+  pty:
+    opencode_command: ["opencode", "--model", "glm-5.2:cloud"]
+    pi_command: ["pi"]
+  ```
+- Claude-specific flags (permission mode, model, effort, session, worktree) and the permission/startup dialogs apply **only** in Claude mode. The Model options `Fable`/`Opus`/`Sonnet`/`Haiku` map to the CLI `--model` aliases (always newest of each tier).
 - The first-run wizard checks all three CLIs, lets you set each path, and pick the default backend.
 
 **Highlights:**
@@ -124,6 +130,14 @@ cd ai-workbench && cargo build --release
 | Right-click | Paste from system clipboard into pane under cursor (mirrors Kitty's `mouse_map right press paste`) |
 
 **See [USAGE.md](USAGE.md) for complete keyboard shortcuts and detailed usage guide.**
+
+### What's New in v1.4.0
+
+- **Transparent daily `claude update`.** On the first launch of each day, ai-workbench runs `claude update` as a detached background process so you're always on a fresh Claude CLI — nothing shows in the TUI, output goes to the update log. Tracked per-day in `session.yaml`; disable with `claude.daily_update: false`.
+- **`F8` switches the AI backend at runtime.** Press `F8` to cycle the AI pane through Claude → OpenCode → Pi — it respawns the pane with the new backend and remembers the choice in `session.yaml`. Settings moved from `F8` to **`Shift+F8`**.
+- **OpenCode / Pi startup options, editable in Settings.** The OpenCode and Pi commands now accept full command lines with arguments (e.g. `opencode --model glm-5.2:cloud`) and are editable under **Settings (Shift+F8) → Paths** as well as via `pty.opencode_command` / `pty.pi_command` in `config.yaml`.
+- **Claude model selection refreshed.** The startup dialog now offers **Fable / Opus / Sonnet / Haiku** (plus CLI-Default), mapped to the CLI `--model` aliases so they always resolve to the newest model of each tier — no version pinning that goes stale.
+- **Remote Control removed** from the Claude startup dialog and the `--remote-control` flag path (the `claude.remote_control` config key is gone). Existing configs still load — the unknown key is ignored.
 
 ### What's New in v1.3.0
 

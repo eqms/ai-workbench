@@ -17,6 +17,10 @@ pub struct SessionState {
     /// The AI backend used in the most recent run.
     #[serde(default)]
     pub last_backend: AiBackend,
+    /// Date (`YYYY-MM-DD`) the daily background `claude update` was last started.
+    /// Empty until the first run. Used to trigger the update at most once per day.
+    #[serde(default)]
+    pub last_claude_update: String,
 }
 
 /// Absolute path to the session file, or `None` if no config dir is resolvable.

@@ -403,7 +403,6 @@ impl App {
                             effort: self.config.claude.default_effort,
                             session_name: self.config.claude.default_session_name.clone(),
                             worktree: self.config.claude.default_worktree.clone(),
-                            remote_control: self.config.claude.remote_control,
                         };
                         self.init_claude_pty(opts);
                     }

@@ -10,6 +10,28 @@ use ratatui::{
     Frame,
 };
 
+/// Join an argv vector into an editable command-line string. Empty → `fallback`.
+fn join_command(argv: &[String], fallback: &str) -> String {
+    if argv.is_empty() {
+        fallback.to_string()
+    } else {
+        argv.join(" ")
+    }
+}
+
+/// Split an edited command-line string into argv (shell-style). A blank input
+/// or an unparseable line (e.g. an unbalanced quote) falls back to `[fallback]`
+/// so the AI pane always has a runnable command.
+fn split_command(line: &str, fallback: &str) -> Vec<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return vec![fallback.to_string()];
+    }
+    shlex::split(trimmed)
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| vec![fallback.to_string()])
+}
+
 /// Settings categories
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SettingsCategory {
@@ -86,6 +108,8 @@ pub enum SettingsField {
     // Paths
     ClaudePath,
     LazygitPath,
+    OpenCodeCommand,
+    PiCommand,
     Browser,
     ExternalEditor,
     ExportDir,
@@ -185,6 +209,10 @@ pub struct SettingsState {
     pub claude_height: u16,
     pub claude_path: String,
     pub lazygit_path: String,
+    /// Full command line for the OpenCode AI backend (e.g. `opencode --model x`).
+    pub opencode_command: String,
+    /// Full command line for the Pi AI backend.
+    pub pi_command: String,
     pub browser: String,
     pub external_editor: String,
     pub export_dir: String,
@@ -246,6 +274,8 @@ impl Default for SettingsState {
             claude_height: 40,
             claude_path: "claude".to_string(),
             lazygit_path: "lazygit".to_string(),
+            opencode_command: "opencode".to_string(),
+            pi_command: "pi".to_string(),
             browser: String::new(),
             external_editor: String::new(),
             export_dir: String::new(),
@@ -313,6 +343,9 @@ impl SettingsState {
             .first()
             .cloned()
             .unwrap_or_else(|| "lazygit".to_string());
+        // Backend commands are full command lines (binary + args); join for editing.
+        self.opencode_command = join_command(&config.pty.opencode_command, "opencode");
+        self.pi_command = join_command(&config.pty.pi_command, "pi");
         self.browser = config.ui.browser.clone();
         self.external_editor = config.ui.external_editor.clone();
         self.export_dir = config.ui.export_dir.clone();
@@ -360,6 +393,9 @@ impl SettingsState {
         config.layout.claude_height_percent = self.claude_height;
         config.pty.claude_command = vec![self.claude_path.clone()];
         config.pty.lazygit_command = vec![self.lazygit_path.clone()];
+        // Split full command lines into argv; fall back to the bare binary.
+        config.pty.opencode_command = split_command(&self.opencode_command, "opencode");
+        config.pty.pi_command = split_command(&self.pi_command, "pi");
         config.ui.browser = self.browser.clone();
         config.ui.external_editor = self.external_editor.clone();
         config.ui.export_dir = self.export_dir.clone();
@@ -434,7 +470,7 @@ impl SettingsState {
         match self.category {
             SettingsCategory::General => 6, // shell, scrollback, hidden, autosave, auto-refresh, check updates
             SettingsCategory::Layout => 4,  // file_browser, preview, right_panel, claude_height
-            SettingsCategory::Paths => 5,   // claude, lazygit, browser, external_editor, export_dir
+            SettingsCategory::Paths => 7, // claude, lazygit, opencode, pi, browser, external_editor, export_dir
             SettingsCategory::Document => 23,
             SettingsCategory::Ssh => 3, // enabled, helper path, reset hint
             SettingsCategory::About => 0,
@@ -480,9 +516,11 @@ impl SettingsState {
             SettingsCategory::Paths => match self.selected_idx {
                 0 => Some(SettingsField::ClaudePath),
                 1 => Some(SettingsField::LazygitPath),
-                2 => Some(SettingsField::Browser),
-                3 => Some(SettingsField::ExternalEditor),
-                4 => Some(SettingsField::ExportDir),
+                2 => Some(SettingsField::OpenCodeCommand),
+                3 => Some(SettingsField::PiCommand),
+                4 => Some(SettingsField::Browser),
+                5 => Some(SettingsField::ExternalEditor),
+                6 => Some(SettingsField::ExportDir),
                 _ => None,
             },
             SettingsCategory::Document => match self.selected_idx {
@@ -558,6 +596,8 @@ impl SettingsState {
                 SettingsField::ClaudeHeight => self.claude_height.to_string(),
                 SettingsField::ClaudePath => self.claude_path.clone(),
                 SettingsField::LazygitPath => self.lazygit_path.clone(),
+                SettingsField::OpenCodeCommand => self.opencode_command.clone(),
+                SettingsField::PiCommand => self.pi_command.clone(),
                 SettingsField::ExportDir => self.export_dir.clone(),
                 SettingsField::CompanyName => self.company_name.clone(),
                 SettingsField::CompanyFooterText => self.company_footer_text.clone(),
@@ -778,6 +818,8 @@ impl SettingsState {
                 }
                 SettingsField::ClaudePath => self.claude_path = value,
                 SettingsField::LazygitPath => self.lazygit_path = value,
+                SettingsField::OpenCodeCommand => self.opencode_command = value,
+                SettingsField::PiCommand => self.pi_command = value,
                 SettingsField::Browser => self.browser = value,
                 SettingsField::ExternalEditor => self.external_editor = value,
                 SettingsField::ExportDir => self.export_dir = value,
@@ -1094,24 +1136,38 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.editing.as_ref() == Some(&SettingsField::LazygitPath),
             &state.input_buffer,
         ),
+        format_setting(
+            "OpenCode Command",
+            &state.opencode_command,
+            state.selected_idx == 2,
+            state.editing.as_ref() == Some(&SettingsField::OpenCodeCommand),
+            &state.input_buffer,
+        ),
+        format_setting(
+            "Pi Command",
+            &state.pi_command,
+            state.selected_idx == 3,
+            state.editing.as_ref() == Some(&SettingsField::PiCommand),
+            &state.input_buffer,
+        ),
         format_dropdown_setting(
             "Browser",
             &browser_display,
-            state.selected_idx == 2,
+            state.selected_idx == 4,
             state.editing.as_ref() == Some(&SettingsField::Browser),
             &state.input_buffer,
         ),
         format_dropdown_setting(
             "External Editor",
             &editor_display,
-            state.selected_idx == 3,
+            state.selected_idx == 5,
             state.editing.as_ref() == Some(&SettingsField::ExternalEditor),
             &state.input_buffer,
         ),
         format_setting(
             "Export Directory",
             &export_dir_display,
-            state.selected_idx == 4,
+            state.selected_idx == 6,
             state.editing.as_ref() == Some(&SettingsField::ExportDir),
             &state.input_buffer,
         ),
@@ -1519,9 +1575,45 @@ mod tests {
 
     #[test]
     fn test_paths_item_count() {
-        let state = SettingsState::default();
-        // Paths: claude, lazygit, browser, external_editor, export_dir = 5
+        let mut state = SettingsState::default();
         assert_eq!(state.item_count(), 6); // General is default
+        state.category = SettingsCategory::Paths;
+        // Paths: claude, lazygit, opencode, pi, browser, external_editor, export_dir
+        assert_eq!(state.item_count(), 7);
+    }
+
+    #[test]
+    fn test_split_command_parses_args() {
+        assert_eq!(
+            split_command("opencode --model glm-5.2:cloud", "opencode"),
+            vec!["opencode", "--model", "glm-5.2:cloud"]
+        );
+    }
+
+    #[test]
+    fn test_split_command_blank_falls_back_to_binary() {
+        assert_eq!(split_command("   ", "pi"), vec!["pi"]);
+        // Unbalanced quote is unparseable → fallback, never a panic.
+        assert_eq!(
+            split_command("opencode \"unclosed", "opencode"),
+            vec!["opencode"]
+        );
+    }
+
+    #[test]
+    fn test_join_command_roundtrip_and_empty() {
+        assert_eq!(join_command(&[], "opencode"), "opencode");
+        assert_eq!(
+            join_command(
+                &[
+                    "opencode".to_string(),
+                    "--model".to_string(),
+                    "x".to_string()
+                ],
+                "opencode"
+            ),
+            "opencode --model x"
+        );
     }
 
     #[test]

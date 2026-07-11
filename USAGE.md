@@ -16,7 +16,7 @@
 | Ctrl+P | Fuzzy Finder |
 | Ctrl+O | Open Markdown Preview (path dialog with tab-complete) |
 | Ctrl+X | Export Markdown as MD/PDF (format chooser + target path) |
-| Shift+F2 | Open in External Editor (Preview file when Preview active, otherwise FileBrowser selection; configure in Settings F8) |
+| Shift+F2 | Open in External Editor (Preview file when Preview active, otherwise FileBrowser selection; configure in Settings Shift+F8) |
 | Ctrl+V | Paste from clipboard (in input dialogs) |
 | Ctrl+Shift+W | Setup Wizard |
 | F1 | Toggle File Browser |
@@ -26,7 +26,8 @@
 | F5 | Toggle LazyGit (restarts in current directory) |
 | F6 | Toggle User Terminal (syncs to current directory) |
 | F7 | Claude Settings (~/.claude) |
-| F8 | Settings |
+| F8 | Switch AI backend (Claude → OpenCode → Pi), respawns the AI pane |
+| Shift+F8 | Settings |
 | F9 | File Menu (File Browser) / Copy last command block (Terminal) or last N lines (Claude, LazyGit) |
 | Shift+F9 | Copy last N lines with interactive count input (Terminal panes) |
 | F10 | About |
@@ -101,7 +102,7 @@ Note: `Ctrl+C` and `Ctrl+X` without an active selection operate on the current l
 - Footer button shows `Auto:ON` / `Auto:OFF` to indicate current state
 - Footer right side shows `AUTO:ON` (green) or `AUTO:OFF` (dim) permanently
 - After autosave triggers, footer briefly shows `✓ SAVED` (green flash, 2s)
-- Toggle via Ctrl+A in edit mode or F8 Settings
+- Toggle via Ctrl+A in edit mode or Shift+F8 Settings
 
 **Horizontal Scrolling:** Use `h`/`l` keys or `Shift+Scroll` for horizontal scrolling in Edit mode.
 
@@ -181,7 +182,7 @@ When all upper panes (File Browser, Preview, LazyGit, Terminal) are hidden, Clau
 
 ### Claude Startup Dialog
 
-At startup, a unified multi-section dialog lets you pre-configure Claude Code. Six sections: **Permission Mode** (6 modes incl. new `auto`), **Model** (sonnet/opus), **Effort** (low…max), **Session Name**, **Worktree**, and **Remote Control**.
+At startup, a unified multi-section dialog lets you pre-configure Claude Code. Five sections: **Permission Mode** (6 modes incl. `auto`), **Model** (Fable/Opus/Sonnet/Haiku), **Effort** (low…max), **Session Name**, and **Worktree**.
 
 | Key | Action |
 |-----|--------|
@@ -190,15 +191,16 @@ At startup, a unified multi-section dialog lets you pre-configure Claude Code. S
 | ←/→ or ↑/↓ | Select radio option in Model/Effort |
 | Left/Right/Home/End | Cursor in text fields (Session/Worktree) |
 | Backspace/Delete | Edit text fields |
-| Space | Toggle Remote Control (when focused) |
 | Enter | Confirm selection and persist to config |
 | Esc | Use saved defaults |
 
-All values persist to `~/.config/ai-workbench/config.yaml` under `claude.*` (`default_permission_mode`, `default_model`, `default_effort`, `default_session_name`, `default_worktree`, `remote_control`) and are pre-selected on next launch.
+All values persist to `~/.config/ai-workbench/config.yaml` under `claude.*` (`default_permission_mode`, `default_model`, `default_effort`, `default_session_name`, `default_worktree`) and are pre-selected on next launch.
 
 **Permission Modes (6):** `default`, `acceptEdits`, `auto`, `plan`, `bypassPermissions`, `dangerouslySkip`. The new `auto` mode lets Claude check each tool call for risky actions and prompt injection before executing — ideal for long-running tasks.
 
-**Remote Control** now uses the official `--remote-control` CLI flag (replaces the former 4-second slash-command hack). Setting persists under `claude.remote_control`.
+**Model:** the options `Fable`/`Opus`/`Sonnet`/`Haiku` map to the CLI `--model` aliases, which always resolve to the newest model of each tier (no version pinning). `CLI-Default` passes no `--model` flag.
+
+**Daily Claude update:** on the first launch of each day, ai-workbench runs `claude update` as a detached background process (transparent — output goes to the update log, not the TUI) so the Claude CLI stays current. Tracked per-day in `session.yaml` (`last_claude_update`); disable with `claude.daily_update: false`.
 
 ### File Browser Features
 
@@ -385,7 +387,8 @@ tmux you also need `set -g allow-passthrough on` (tmux ≥ 3.3).
 | F5 | LazyGit umschalten (startet im aktuellen Verzeichnis neu) |
 | F6 | Benutzer-Terminal umschalten (wechselt ins aktuelle Verzeichnis) |
 | F7 | Claude Einstellungen (~/.claude) |
-| F8 | Einstellungen |
+| F8 | KI-Backend wechseln (Claude → OpenCode → Pi), startet den KI-Bereich neu |
+| Shift+F8 | Einstellungen |
 | F9 | Datei-Menü (Dateibrowser) / Letzten Kommando-Block (Terminal) bzw. letzte N Zeilen (Claude, LazyGit) kopieren |
 | Shift+F9 | Letzte N Zeilen mit interaktiver Eingabe kopieren (Terminal-Bereiche) |
 | F10 | Über |
@@ -456,7 +459,7 @@ Ziehen Sie Bereichsgrenzen zum interaktiven Ändern der Größe. Änderungen wer
 - Footer-Button zeigt `Auto:ON` / `Auto:OFF` für den aktuellen Status
 - Footer rechts zeigt permanent `AUTO:ON` (grün) oder `AUTO:OFF` (gedimmt)
 - Nach Autosave-Auslösung zeigt Footer kurz `✓ SAVED` (grüner Flash, 2s)
-- Umschaltbar via Ctrl+A im Edit-Modus oder F8 Einstellungen
+- Umschaltbar via Ctrl+A im Edit-Modus oder Shift+F8 Einstellungen
 
 **Block-Auswahl & MC Edit Legacy:**
 | Taste | Aktion |
@@ -545,7 +548,7 @@ Wenn alle oberen Bereiche (Dateibrowser, Vorschau, LazyGit, Terminal) ausgeblend
 
 ### Claude Startup-Dialog
 
-Beim Start erscheint ein vereinheitlichter Multi-Sektion-Dialog zur Vorkonfiguration von Claude Code. Sechs Sektionen: **Permission Mode** (6 Modi inkl. neuem `auto`), **Model** (sonnet/opus), **Effort** (low…max), **Session-Name**, **Worktree** und **Remote Control**.
+Beim Start erscheint ein vereinheitlichter Multi-Sektion-Dialog zur Vorkonfiguration von Claude Code. Fünf Sektionen: **Permission Mode** (6 Modi inkl. `auto`), **Model** (Fable/Opus/Sonnet/Haiku), **Effort** (low…max), **Session-Name** und **Worktree**.
 
 | Taste | Aktion |
 |-------|--------|
@@ -554,15 +557,16 @@ Beim Start erscheint ein vereinheitlichter Multi-Sektion-Dialog zur Vorkonfigura
 | ←/→ oder ↑/↓ | Radio-Option in Model/Effort waehlen |
 | Links/Rechts/Home/End | Cursor in Textfeldern (Session/Worktree) |
 | Backspace/Entf | Textfelder editieren |
-| Leertaste | Remote Control umschalten (wenn fokussiert) |
 | Enter | Auswahl bestaetigen und in Config speichern |
 | Esc | Gespeicherte Defaults verwenden |
 
-Alle Werte werden in `~/.config/ai-workbench/config.yaml` unter `claude.*` persistiert (`default_permission_mode`, `default_model`, `default_effort`, `default_session_name`, `default_worktree`, `remote_control`) und beim naechsten Start vorselektiert.
+Alle Werte werden in `~/.config/ai-workbench/config.yaml` unter `claude.*` persistiert (`default_permission_mode`, `default_model`, `default_effort`, `default_session_name`, `default_worktree`) und beim naechsten Start vorselektiert.
 
 **Permission Modes (6):** `default`, `acceptEdits`, `auto`, `plan`, `bypassPermissions`, `dangerouslySkip`. Der neue `auto`-Modus laesst Claude jeden Tool-Call auf riskante Aktionen und Prompt-Injection pruefen — ideal fuer Long-Running Tasks.
 
-**Remote Control** nutzt jetzt das offizielle `--remote-control` CLI-Flag (ersetzt den frueheren 4-Sekunden-Slash-Command-Hack). Einstellung wird unter `claude.remote_control` gespeichert.
+**Model:** Die Optionen `Fable`/`Opus`/`Sonnet`/`Haiku` bilden die CLI-`--model`-Aliase ab, die immer auf die neueste Version der jeweiligen Stufe zeigen (keine feste Versionsnummer). `CLI-Default` übergibt kein `--model`-Flag.
+
+**Tägliches Claude-Update:** Beim ersten Start pro Tag führt ai-workbench `claude update` als detachten Hintergrundprozess aus (transparent — Ausgabe geht ins Update-Log, nicht ins TUI), damit die Claude-CLI aktuell bleibt. Pro Tag in `session.yaml` (`last_claude_update`) vermerkt; abschaltbar via `claude.daily_update: false`.
 
 ### Dateibrowser-Funktionen
 

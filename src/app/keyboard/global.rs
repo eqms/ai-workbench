@@ -188,9 +188,14 @@ impl App {
             return true;
         }
 
-        // F8: Open settings
+        // F8: cycle the AI backend (Claude → OpenCode → Pi). Shift+F8 opens
+        // Settings (moved off plain F8 so F8 can drive the backend switch).
         if key.code == KeyCode::F(8) {
-            self.settings.open(&self.config);
+            if key.modifiers.contains(KeyModifiers::SHIFT) {
+                self.settings.open(&self.config);
+            } else {
+                self.cycle_ai_backend();
+            }
             return true;
         }
 

@@ -363,7 +363,6 @@ impl App {
                         effort: self.config.claude.default_effort,
                         session_name: self.config.claude.default_session_name.clone(),
                         worktree: self.config.claude.default_worktree.clone(),
-                        remote_control: self.config.claude.remote_control,
                     };
                     self.init_claude_pty(opts);
                 }
@@ -376,7 +375,6 @@ impl App {
                 let effort = self.permission_mode_dialog.selected_effort();
                 let session_name = self.permission_mode_dialog.session_name.clone();
                 let worktree = self.permission_mode_dialog.worktree.clone();
-                let remote = self.permission_mode_dialog.remote_control;
 
                 self.permission_mode_dialog.confirm();
 
@@ -386,7 +384,6 @@ impl App {
                 self.config.claude.default_effort = effort;
                 self.config.claude.default_session_name = session_name.clone();
                 self.config.claude.default_worktree = worktree.clone();
-                self.config.claude.remote_control = remote;
                 let _ = crate::config::save_config(&self.config);
 
                 if self.claude_pty_pending {
@@ -396,7 +393,6 @@ impl App {
                         effort,
                         session_name,
                         worktree,
-                        remote_control: remote,
                     };
                     self.init_claude_pty(opts);
                 }
@@ -436,11 +432,6 @@ impl App {
                         }
                         _ => {}
                     },
-                    DialogSection::RemoteControl => {
-                        if let KeyCode::Char(' ') = key.code {
-                            self.permission_mode_dialog.toggle_remote_control();
-                        }
-                    }
                 }
             }
         }

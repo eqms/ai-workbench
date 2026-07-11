@@ -122,6 +122,10 @@ fn help_content() -> Vec<Line<'static>> {
         ]),
         Line::from(vec![
             Span::styled("  F8           ", Style::default().fg(Color::Cyan)),
+            Span::raw("Switch AI backend (Claude → OpenCode → Pi)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Shift+F8     ", Style::default().fg(Color::Cyan)),
             Span::raw("Open Settings Menu"),
         ]),
         Line::from(vec![

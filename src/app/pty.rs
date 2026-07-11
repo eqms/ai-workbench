@@ -16,7 +16,6 @@ pub(crate) struct StartupOptions {
     pub effort: ClaudeEffort,
     pub session_name: String,
     pub worktree: String,
-    pub remote_control: bool,
 }
 
 impl App {
@@ -80,11 +79,6 @@ impl App {
                 cmd.push("--worktree".to_string());
                 cmd.push(opts.worktree.clone());
             }
-
-            // Remote control flag (replaces former slash-command hack)
-            if opts.remote_control && !cmd.iter().any(|a| a == "--remote-control" || a == "--rc") {
-                cmd.push("--remote-control".to_string());
-            }
         }
 
         cmd
@@ -134,7 +128,6 @@ impl App {
                 self.config.claude.default_effort,
                 &self.config.claude.default_session_name,
                 &self.config.claude.default_worktree,
-                self.config.claude.remote_control,
             );
         } else {
             let opts = StartupOptions {
@@ -147,11 +140,30 @@ impl App {
                 effort: self.config.claude.default_effort,
                 session_name: self.config.claude.default_session_name.clone(),
                 worktree: self.config.claude.default_worktree.clone(),
-                remote_control: self.config.claude.remote_control,
             };
             self.init_claude_pty(opts);
             self.active_pane = PaneId::Claude;
         }
+    }
+
+    /// Cycle the AI backend (Claude → OpenCode → Pi → Claude), persist the
+    /// choice to the session, and respawn the AI pane using the new backend.
+    /// Triggered by F8. The respawn reuses [`Self::init_claude_after_wizard`],
+    /// which shows the Claude startup dialog only when switching to Claude with
+    /// `show_permission_dialog` enabled, and otherwise starts the backend CLI
+    /// directly (OpenCode/Pi get their args from `config.pty.*_command`).
+    pub(super) fn cycle_ai_backend(&mut self) {
+        let next = self.backend.next();
+
+        self.backend = next;
+        self.session.last_backend = next;
+        crate::session::save_session(&self.session);
+
+        self.init_claude_after_wizard();
+
+        // Footer confirmation (reuses the 2 s copy-flash channel).
+        self.copy_flash_message = Some(format!("Backend: {}", next.short_label()));
+        self.last_copy_time = Some(std::time::Instant::now());
     }
 
     /// Sync directory to Terminal pane only (not Claude - Claude only gets cd at startup)
@@ -471,7 +483,6 @@ mod tests {
             effort: ClaudeEffort::Unset,
             session_name: String::new(),
             worktree: String::new(),
-            remote_control: false,
         }
     }
 
@@ -540,15 +551,6 @@ mod tests {
     }
 
     #[test]
-    fn test_build_command_remote_control() {
-        let cfg = config_with_claude_command();
-        let mut opts = base_opts();
-        opts.remote_control = true;
-        let cmd = App::build_ai_command(&cfg, AiBackend::Claude, &opts);
-        assert!(cmd.contains(&"--remote-control".to_string()));
-    }
-
-    #[test]
     fn test_build_command_yolo_mode_uses_dangerously_skip() {
         let cfg = config_with_claude_command();
         let mut opts = base_opts();
@@ -567,7 +569,6 @@ mod tests {
         assert!(!cmd.iter().any(|a| a == "--effort"));
         assert!(!cmd.iter().any(|a| a == "--name"));
         assert!(!cmd.iter().any(|a| a == "--worktree"));
-        assert!(!cmd.iter().any(|a| a == "--remote-control"));
     }
 
     #[test]
@@ -579,7 +580,6 @@ mod tests {
             effort: ClaudeEffort::Max,
             session_name: "session1".to_string(),
             worktree: "feat".to_string(),
-            remote_control: true,
         };
         let cmd = App::build_ai_command(&cfg, AiBackend::Claude, &opts);
         assert_eq!(cmd[0], "claude");
@@ -593,7 +593,6 @@ mod tests {
         assert!(cmd.contains(&"session1".to_string()));
         assert!(cmd.contains(&"--worktree".to_string()));
         assert!(cmd.contains(&"feat".to_string()));
-        assert!(cmd.contains(&"--remote-control".to_string()));
     }
 
     #[test]

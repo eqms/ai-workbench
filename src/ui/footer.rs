@@ -98,8 +98,20 @@ fn format_datetime() -> String {
     )
 }
 
+/// Current date as a stable `YYYY-MM-DD` key (UTC day boundary). Used for
+/// once-per-day scheduling (e.g. the daily `claude update`); matches the footer
+/// clock's day calculation so "today" is consistent across the app.
+pub(crate) fn today_key() -> String {
+    let secs = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let (year, month, day) = days_to_date((secs / 86400) as i64);
+    format!("{:04}-{:02}-{:02}", year, month, day)
+}
+
 /// Convert days since Unix epoch to (year, month, day)
-fn days_to_date(days: i64) -> (i32, u32, u32) {
+pub(crate) fn days_to_date(days: i64) -> (i32, u32, u32) {
     // Days since epoch (1970-01-01)
     let remaining = days + 719468; // Days from year 0 to 1970-01-01
 
@@ -528,5 +540,28 @@ impl Widget for Footer {
             .render(keys_area, buf);
 
         Paragraph::new(Line::from(right_spans)).render(right_area, buf);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn days_to_date_epoch_is_1970_01_01() {
+        assert_eq!(days_to_date(0), (1970, 1, 1));
+        // 2000-01-01 is 10957 days after the epoch.
+        assert_eq!(days_to_date(10957), (2000, 1, 1));
+    }
+
+    #[test]
+    fn today_key_is_iso_yyyy_mm_dd() {
+        let key = today_key();
+        let parts: Vec<&str> = key.split('-').collect();
+        assert_eq!(parts.len(), 3, "expected YYYY-MM-DD, got {key}");
+        assert_eq!(parts[0].len(), 4);
+        assert_eq!(parts[1].len(), 2);
+        assert_eq!(parts[2].len(), 2);
+        assert!(key.chars().all(|c| c.is_ascii_digit() || c == '-'));
     }
 }

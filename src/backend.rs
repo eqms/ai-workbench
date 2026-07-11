@@ -37,6 +37,15 @@ impl AiBackend {
         [Self::Claude, Self::OpenCode, Self::Pi]
     }
 
+    /// The next backend in the cycle (wraps Pi → Claude). Drives the F8 switch.
+    pub fn next(self) -> Self {
+        match self {
+            Self::Claude => Self::OpenCode,
+            Self::OpenCode => Self::Pi,
+            Self::Pi => Self::Claude,
+        }
+    }
+
     /// The default executable name looked up on `$PATH`.
     pub fn binary_name(&self) -> &'static str {
         match self {
@@ -99,6 +108,13 @@ mod tests {
     #[test]
     fn default_is_claude() {
         assert_eq!(AiBackend::default(), AiBackend::Claude);
+    }
+
+    #[test]
+    fn next_cycles_and_wraps() {
+        assert_eq!(AiBackend::Claude.next(), AiBackend::OpenCode);
+        assert_eq!(AiBackend::OpenCode.next(), AiBackend::Pi);
+        assert_eq!(AiBackend::Pi.next(), AiBackend::Claude);
     }
 
     #[test]

@@ -187,9 +187,10 @@ pub struct ClaudeConfig {
     /// Show permission mode selection dialog at startup (default: true)
     #[serde(default = "default_show_permission_dialog")]
     pub show_permission_dialog: bool,
-    /// Enable remote control mode (claude remote-control) for session sharing
-    #[serde(default)]
-    pub remote_control: bool,
+    /// Run `claude update` once per day in the background on startup (default: true).
+    /// Transparent to the user — output goes to the update log, not the TUI.
+    #[serde(default = "default_true")]
+    pub daily_update: bool,
     /// Default Claude model (--model flag)
     #[serde(default)]
     pub default_model: ClaudeModel,
@@ -210,7 +211,7 @@ impl Default for ClaudeConfig {
             startup_prefixes: Vec::new(),
             default_permission_mode: None,
             show_permission_dialog: true, // Dialog is shown by default
-            remote_control: false,
+            daily_update: true,
             default_model: ClaudeModel::Unset,
             default_effort: ClaudeEffort::Unset,
             default_session_name: String::new(),

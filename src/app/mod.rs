@@ -1,4 +1,5 @@
 mod clipboard;
+mod daily_claude;
 mod drawing;
 mod file_ops;
 mod git_ops;
@@ -214,7 +215,6 @@ impl App {
                 config.claude.default_effort,
                 &config.claude.default_session_name,
                 &config.claude.default_worktree,
-                config.claude.remote_control,
             );
             claude_command_str = String::new();
         } else {
@@ -231,7 +231,6 @@ impl App {
                 effort: config.claude.default_effort,
                 session_name: config.claude.default_session_name.clone(),
                 worktree: config.claude.default_worktree.clone(),
-                remote_control: config.claude.remote_control,
             };
             let claude_cmd = Self::build_ai_command(&config, backend, &opts);
             claude_command_str = claude_cmd.join(" ");
@@ -406,6 +405,10 @@ impl App {
 
         // Start background update check (non-blocking)
         app.start_update_check();
+
+        // First start of the day: transparently update the Claude CLI in the
+        // background (detached, logged, no UI). Gated by config.claude.daily_update.
+        app.maybe_daily_claude_update();
 
         app
     }

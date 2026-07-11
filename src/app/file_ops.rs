@@ -808,10 +808,8 @@ impl App {
                     // Adopt the backend chosen in the wizard as the active one and
                     // persist it so a future argument-less launch resumes it.
                     self.backend = self.wizard.selected_backend;
-                    crate::session::save_session(&crate::session::SessionState {
-                        last_cwd: self.session.last_cwd.clone(),
-                        last_backend: self.backend,
-                    });
+                    self.session.last_backend = self.backend;
+                    crate::session::save_session(&self.session);
                     // Close wizard and initialize the AI PTY with the new config.
                     self.wizard.close();
                     self.init_claude_after_wizard();

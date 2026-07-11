@@ -17,7 +17,6 @@ pub enum DialogSection {
     Effort,
     Session,
     Worktree,
-    RemoteControl,
 }
 
 impl DialogSection {
@@ -27,27 +26,25 @@ impl DialogSection {
             Self::Model => Self::Effort,
             Self::Effort => Self::Session,
             Self::Session => Self::Worktree,
-            Self::Worktree => Self::RemoteControl,
-            Self::RemoteControl => Self::Permission,
+            Self::Worktree => Self::Permission,
         }
     }
 
     fn prev(self) -> Self {
         match self {
-            Self::Permission => Self::RemoteControl,
+            Self::Permission => Self::Worktree,
             Self::Model => Self::Permission,
             Self::Effort => Self::Model,
             Self::Session => Self::Effort,
             Self::Worktree => Self::Session,
-            Self::RemoteControl => Self::Worktree,
         }
     }
 }
 
 /// Unified state for the Claude startup dialog (v0.81.0+).
 ///
-/// Combines permission mode, model, effort, session name, worktree and
-/// remote control into one vertical multi-section dialog.
+/// Combines permission mode, model, effort, session name and worktree into
+/// one vertical multi-section dialog.
 #[derive(Debug, Clone, Default)]
 pub struct PermissionModeState {
     pub visible: bool,
@@ -63,14 +60,12 @@ pub struct PermissionModeState {
 
     pub worktree: String,
     pub worktree_cursor: usize,
-
-    pub remote_control: bool,
 }
 
 impl PermissionModeState {
     /// Legacy alias for callers that don't have all defaults yet.
     pub fn open(&mut self) {
-        self.open_with_defaults(None, ClaudeModel::Unset, ClaudeEffort::Unset, "", "", false);
+        self.open_with_defaults(None, ClaudeModel::Unset, ClaudeEffort::Unset, "", "");
     }
 
     /// Open dialog with full set of default values (called from pty.rs).
@@ -81,7 +76,6 @@ impl PermissionModeState {
         default_effort: ClaudeEffort,
         default_session_name: &str,
         default_worktree: &str,
-        remote_control: bool,
     ) {
         self.visible = true;
         self.confirmed = false;
@@ -104,8 +98,6 @@ impl PermissionModeState {
 
         self.worktree = default_worktree.to_string();
         self.worktree_cursor = self.worktree.chars().count();
-
-        self.remote_control = remote_control;
     }
 
     pub fn close(&mut self) {
@@ -237,12 +229,6 @@ impl PermissionModeState {
         }
     }
 
-    pub fn toggle_remote_control(&mut self) {
-        if self.section == DialogSection::RemoteControl {
-            self.remote_control = !self.remote_control;
-        }
-    }
-
     // ── Accessors ────────────────────────────────────────────────────────
 
     pub fn selected_permission_mode(&self) -> ClaudePermissionMode {
@@ -286,10 +272,9 @@ pub fn render(frame: &mut Frame, area: Rect, state: &PermissionModeState) {
     let efforts = ClaudeEffort::all();
 
     let popup_width: u16 = 76;
-    // Dynamic height: title(2) + permission-list(6) + sep+header+model(3)
-    //                 + sep+header+effort(3) + sep+header+session(3)
-    //                 + worktree(2) + sep+header+remote(3) + footer(2) + borders(2)
-    let popup_height: u16 = (modes.len() as u16 + 19).min(area.height.saturating_sub(2));
+    // Dynamic height: title(2) + permission-list(len+1) + model(2) + effort(2)
+    //                 + session(3) + footer(2) + borders(2)
+    let popup_height: u16 = (modes.len() as u16 + 15).min(area.height.saturating_sub(2));
 
     let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
     let popup_y = area.y + (area.height.saturating_sub(popup_height)) / 2;
@@ -314,7 +299,6 @@ pub fn render(frame: &mut Frame, area: Rect, state: &PermissionModeState) {
         Constraint::Length(2),                      // Model (header + row)
         Constraint::Length(2),                      // Effort (header + row)
         Constraint::Length(3),                      // Session (header + 2 rows: Name + Worktree)
-        Constraint::Length(2),                      // Remote Control (header + row)
         Constraint::Min(2),                         // Footer
     ])
     .split(popup_area.inner(ratatui::layout::Margin {
@@ -327,8 +311,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &PermissionModeState) {
     render_model_section(frame, chunks[2], state, models);
     render_effort_section(frame, chunks[3], state, efforts);
     render_session_section(frame, chunks[4], state);
-    render_remote_section(frame, chunks[5], state);
-    render_footer(frame, chunks[6]);
+    render_footer(frame, chunks[5]);
 }
 
 fn render_title(frame: &mut Frame, area: Rect) {
@@ -601,49 +584,6 @@ fn text_field_line<'a>(
     Paragraph::new(Line::from(spans))
 }
 
-fn render_remote_section(frame: &mut Frame, area: Rect, state: &PermissionModeState) {
-    let is_active = state.section == DialogSection::RemoteControl;
-    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
-
-    let header = Paragraph::new(Line::from(vec![
-        Span::styled("[ Options ]", section_header_style(is_active)),
-        Span::styled(
-            if is_active { "  Space togglen" } else { "" },
-            Style::default().fg(Color::DarkGray),
-        ),
-    ]));
-    frame.render_widget(header, chunks[0]);
-
-    let checkbox = if state.remote_control { "[x]" } else { "[ ]" };
-    let marker = if is_active { "▸ " } else { "  " };
-    let line = Paragraph::new(Line::from(vec![
-        Span::styled(
-            marker,
-            Style::default().fg(if is_active {
-                Color::Yellow
-            } else {
-                Color::DarkGray
-            }),
-        ),
-        Span::styled(
-            format!("{} Remote Control ", checkbox),
-            Style::default()
-                .fg(if is_active {
-                    Color::Yellow
-                } else {
-                    Color::White
-                })
-                .add_modifier(if is_active {
-                    Modifier::BOLD
-                } else {
-                    Modifier::empty()
-                }),
-        ),
-        Span::styled("(--remote-control)", Style::default().fg(Color::DarkGray)),
-    ]));
-    frame.render_widget(line, chunks[1]);
-}
-
 fn render_footer(frame: &mut Frame, area: Rect) {
     let footer = Line::from(vec![
         Span::styled(" Enter ", Style::default().bg(Color::Cyan).fg(Color::Black)),
@@ -657,12 +597,7 @@ fn render_footer(frame: &mut Frame, area: Rect) {
             " Esc ",
             Style::default().bg(Color::DarkGray).fg(Color::White),
         ),
-        Span::raw(" Standard  "),
-        Span::styled(
-            " Space ",
-            Style::default().bg(Color::DarkGray).fg(Color::White),
-        ),
-        Span::raw(" Toggle"),
+        Span::raw(" Standard"),
     ]);
     frame.render_widget(Paragraph::new(footer), area);
 }
