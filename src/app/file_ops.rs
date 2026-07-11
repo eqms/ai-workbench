@@ -67,7 +67,10 @@ impl App {
                         }
 
                         if let Err(e) = std::fs::copy(&selected, &new_path) {
-                            eprintln!("Failed to duplicate file: {}", e);
+                            crate::update::log_update(&format!(
+                                "[file_ops] Failed to duplicate file: {}",
+                                e
+                            ));
                         } else {
                             self.file_browser.refresh();
                             self.update_preview();
@@ -210,7 +213,10 @@ impl App {
                     if !name.is_empty() && Self::is_safe_filename(&name) {
                         let new_path = self.file_browser.current_dir.join(&name);
                         if let Err(e) = std::fs::create_dir(&new_path) {
-                            eprintln!("Failed to create directory: {}", e);
+                            crate::update::log_update(&format!(
+                                "[file_ops] Failed to create directory: {}",
+                                e
+                            ));
                         } else {
                             self.file_browser.refresh();
                         }
@@ -253,7 +259,10 @@ impl App {
                         if let Some(filename) = source.file_name() {
                             let target = dest_path.join(filename);
                             if let Err(e) = std::fs::copy(&source, &target) {
-                                eprintln!("Failed to copy file: {}", e);
+                                crate::update::log_update(&format!(
+                                    "[file_ops] Failed to copy file: {}",
+                                    e
+                                ));
                             } else {
                                 self.file_browser.refresh();
                             }
@@ -270,7 +279,10 @@ impl App {
                         if let Some(filename) = source.file_name() {
                             let target = dest_path.join(filename);
                             if let Err(e) = std::fs::rename(&source, &target) {
-                                eprintln!("Failed to move file: {}", e);
+                                crate::update::log_update(&format!(
+                                    "[file_ops] Failed to move file: {}",
+                                    e
+                                ));
                             } else {
                                 self.file_browser.refresh();
                             }
@@ -786,7 +798,10 @@ impl App {
                     let new_config = self.wizard.generate_config();
                     self.config = new_config;
                     if let Err(e) = crate::config::save_config(&self.config) {
-                        eprintln!("Failed to save config: {}", e);
+                        crate::update::log_update(&format!(
+                            "[file_ops] Failed to save config: {}",
+                            e
+                        ));
                     }
                     self.wizard.next_step(); // Go to Complete
                 } else if self.wizard.step == WizardStep::Complete {
@@ -924,7 +939,10 @@ impl App {
                 if self.settings.has_changes {
                     self.settings.apply_to_config(&mut self.config);
                     if let Err(e) = crate::config::save_config(&self.config) {
-                        eprintln!("Failed to save config: {}", e);
+                        crate::update::log_update(&format!(
+                            "[file_ops] Failed to save config: {}",
+                            e
+                        ));
                     }
                 }
                 self.settings.close();
@@ -955,7 +973,10 @@ impl App {
                 if self.settings.has_changes {
                     self.settings.apply_to_config(&mut self.config);
                     if let Err(e) = crate::config::save_config(&self.config) {
-                        eprintln!("Failed to save config: {}", e);
+                        crate::update::log_update(&format!(
+                            "[file_ops] Failed to save config: {}",
+                            e
+                        ));
                     }
                 }
                 self.settings.close();

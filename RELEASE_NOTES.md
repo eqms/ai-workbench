@@ -1,5 +1,24 @@
 # Release Notes
 
+## Version 1.0.2 (11.07.2026)
+
+### Fixed
+
+- **[FIX] Init-Wizard zerschoss das TUI-Layout (Terminal-Buffer-Korruption).**
+  Beim First-Run-Wizard erschienen überlappende Geister-Inhalte mehrerer
+  Wizard-Schritte plus Fremdzeilen (`[Update] Platform: …`, `[Update] GitHub
+  version: …`, `[Update] Already up-to-date`), sodass das Fenster „viel zu groß und
+  deplatziert" wirkte. Ursache war nicht die Wizard-Geometrie, sondern der
+  Update-Check: er lief in einem Hintergrund-Thread und schrieb unter
+  `#[cfg(debug_assertions)]` per `eprintln!` direkt auf stderr — dasselbe Terminal,
+  das Ratatui im Alternate-Screen zeichnet. Diese Out-of-Band-Writes
+  desynchronisierten Ratatuis Diff-Buffer. Alle Diagnose-Ausgaben in
+  `check_for_update_with_version` wandern jetzt über `log_update()` ausschließlich
+  in die Log-Datei (`~/Library/Caches/ai-workbench/update.log`). Zusätzlich wurden
+  die sieben `eprintln!`-Fehlerausgaben in `src/app/file_ops.rs` (Datei-I/O,
+  Config-Speichern) auf denselben Log-Sink umgestellt, um dieselbe
+  Korruptionsklasse künftig auszuschließen.
+
 ## Version 1.0.1 (10.07.2026)
 
 ### Fixed

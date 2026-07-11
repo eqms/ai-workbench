@@ -15,17 +15,20 @@ use super::{REPO_NAME, REPO_OWNER};
 ///
 /// Allows overriding the current version for testing purposes.
 pub fn check_for_update_with_version(current_version: &str) -> UpdateCheckResult {
-    #[cfg(debug_assertions)]
-    {
-        eprintln!("[Update] Current version: {}", current_version);
-        eprintln!("[Update] Checking GitHub: {}/{}", REPO_OWNER, REPO_NAME);
-        eprintln!("[Update] Binary name: {}", super::BIN_NAME);
-        eprintln!(
-            "[Update] Platform: {}-{}",
-            std::env::consts::OS,
-            std::env::consts::ARCH
-        );
-    }
+    // NOTE: diagnostics go through log_update (file-only) — never eprintln!/println!.
+    // The check runs on a background thread while ratatui owns the terminal; any
+    // direct stdout/stderr write desyncs ratatui's diff buffer and corrupts the TUI.
+    super::log_update(&format!("[check] Current version: {}", current_version));
+    super::log_update(&format!(
+        "[check] Checking GitHub: {}/{}",
+        REPO_OWNER, REPO_NAME
+    ));
+    super::log_update(&format!("[check] Binary name: {}", super::BIN_NAME));
+    super::log_update(&format!(
+        "[check] Platform: {}-{}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    ));
 
     match ReleaseList::configure()
         .repo_owner(REPO_OWNER)
@@ -50,30 +53,26 @@ pub fn check_for_update_with_version(current_version: &str) -> UpdateCheckResult
                     .map(|(_, r)| r);
 
                 let Some(latest) = latest else {
-                    #[cfg(debug_assertions)]
-                    eprintln!("[Update] No releases found");
+                    super::log_update("[check] No releases found");
                     return UpdateCheckResult::NoReleasesFound;
                 };
 
                 let target_version = &latest.version;
 
-                #[cfg(debug_assertions)]
-                eprintln!("[Update] GitHub version: {}", target_version);
+                super::log_update(&format!("[check] GitHub version: {}", target_version));
 
                 let current_normalized =
                     current_version.strip_prefix('v').unwrap_or(current_version);
                 let target_normalized = target_version.strip_prefix('v').unwrap_or(target_version);
 
                 if target_normalized == current_normalized {
-                    #[cfg(debug_assertions)]
-                    eprintln!("[Update] Already up-to-date");
+                    super::log_update("[check] Already up-to-date");
                     UpdateCheckResult::UpToDate
                 } else if version_newer(target_version, current_version) {
-                    #[cfg(debug_assertions)]
-                    eprintln!(
-                        "[Update] Update available: {} -> {}",
+                    super::log_update(&format!(
+                        "[check] Update available: {} -> {}",
                         current_normalized, target_normalized
-                    );
+                    ));
                     UpdateCheckResult::UpdateAvailable {
                         version: target_version.clone(),
                         release_notes: latest
@@ -82,20 +81,17 @@ pub fn check_for_update_with_version(current_version: &str) -> UpdateCheckResult
                             .map(|n| filter_release_notes_for_platform(n)),
                     }
                 } else {
-                    #[cfg(debug_assertions)]
-                    eprintln!("[Update] Current version is newer than latest release");
+                    super::log_update("[check] Current version is newer than latest release");
                     UpdateCheckResult::UpToDate
                 }
             }
             Err(e) => {
-                #[cfg(debug_assertions)]
-                eprintln!("[Update] Error fetching releases: {}", e);
+                super::log_update(&format!("[check] Error fetching releases: {}", e));
                 UpdateCheckResult::Error(format!("{}", e))
             }
         },
         Err(e) => {
-            #[cfg(debug_assertions)]
-            eprintln!("[Update] Error: {}", e);
+            super::log_update(&format!("[check] Error: {}", e));
             UpdateCheckResult::Error(format!("{}", e))
         }
     }
