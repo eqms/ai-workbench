@@ -69,6 +69,7 @@ fn backend_description(backend: AiBackend) -> &'static str {
         AiBackend::Claude => "Anthropic Claude Code (permission/model/effort flags)",
         AiBackend::OpenCode => "OpenCode CLI",
         AiBackend::Pi => "Pi CLI (by Inflection)",
+        AiBackend::Codex => "OpenAI Codex CLI",
     }
 }
 
@@ -200,6 +201,8 @@ mod tests {
         state.next();
         assert_eq!(state.selected_backend(), AiBackend::Pi);
         state.next();
+        assert_eq!(state.selected_backend(), AiBackend::Codex);
+        state.next();
         assert_eq!(state.selected_backend(), AiBackend::Claude);
     }
 
@@ -208,9 +211,9 @@ mod tests {
         let mut state = BackendSwitchState::default();
         state.open(AiBackend::Claude);
         state.prev();
-        assert_eq!(state.selected_backend(), AiBackend::Pi);
+        assert_eq!(state.selected_backend(), AiBackend::Codex);
         state.prev();
-        assert_eq!(state.selected_backend(), AiBackend::OpenCode);
+        assert_eq!(state.selected_backend(), AiBackend::Pi);
     }
 
     #[test]

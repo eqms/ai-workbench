@@ -31,9 +31,9 @@ use update::{perform_update_to_version_sync, UpdateResult};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// AI backend for the primary pane: `claude`, `opencode`, or `pi`
-    /// (case-insensitive). When omitted, the last-used backend is resumed
-    /// (default on first run: claude).
+    /// AI backend for the primary pane: `claude`, `opencode`, `pi`, or
+    /// `codex` (case-insensitive). When omitted, the last-used backend is
+    /// resumed (default on first run: claude).
     #[arg(value_name = "BACKEND")]
     mode: Option<String>,
 
@@ -587,7 +587,7 @@ fn main() -> Result<()> {
     // message and a non-zero exit code.
     if let Some(mode) = &args.mode {
         if AiBackend::parse(mode).is_none() {
-            eprintln!("Error: unknown backend '{mode}'. Valid: claude, opencode, pi");
+            eprintln!("Error: unknown backend '{mode}'. Valid: claude, opencode, pi, codex");
             std::process::exit(2);
         }
     }

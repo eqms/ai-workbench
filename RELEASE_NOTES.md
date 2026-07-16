@@ -1,5 +1,11 @@
 # Release Notes
 
+## Version 1.8.0 (16.07.2026)
+
+### Added
+
+- **[ADD] Codex (OpenAI) as fourth AI backend.** The AI pane can now run OpenAI's `codex` CLI alongside Claude Code, OpenCode, and Pi: launch with `ai-workbench codex`, or switch at runtime via the F8 backend menu (now 4 entries). Codex starts directly (like OpenCode/Pi — no startup dialog); its own flags (`-s` sandbox mode, `-a` approval policy, `-m` model, `--search`) are configurable via the new `pty.codex_command` config field, editable under F8-Settings → Paths → "Codex Command". The setup wizard gained a Codex CLI detection line, path field, backend choice `4`, and confirmation entry. The selected backend persists in `session.yaml` as before (`last_backend: codex`). New `AiBackend::Codex` variant flows through the existing data-driven F8 menu/footer/pane-title/respawn plumbing; Claude-specific paths (permission dialog, daily `claude update`) stay Claude-only via `supports_claude_flags()`. New config field is serde-defaulted (`["codex"]`) — existing config.yaml files load unchanged. 1 new unit test plus extended backend/menu/wizard tests (240 total).
+
 ## Version 1.7.1 (16.07.2026)
 
 ### Fixed

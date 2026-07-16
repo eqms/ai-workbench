@@ -39,6 +39,9 @@ pub struct PtyConfig {
     /// Command for the AI pane in Pi mode (default: `["pi"]`).
     #[serde(default = "default_pi_command")]
     pub pi_command: Vec<String>,
+    /// Command for the AI pane in Codex mode (default: `["codex"]`).
+    #[serde(default = "default_codex_command")]
+    pub codex_command: Vec<String>,
     pub lazygit_command: Vec<String>,
     pub scrollback_lines: usize,
     /// Auto-restart PTY processes when they exit (default: true)
@@ -76,6 +79,10 @@ fn default_pi_command() -> Vec<String> {
     vec!["pi".to_string()]
 }
 
+fn default_codex_command() -> Vec<String> {
+    vec!["codex".to_string()]
+}
+
 impl PtyConfig {
     /// The configured command for the AI pane in the given backend mode.
     pub fn command_for(&self, backend: crate::backend::AiBackend) -> &Vec<String> {
@@ -84,6 +91,7 @@ impl PtyConfig {
             AiBackend::Claude => &self.claude_command,
             AiBackend::OpenCode => &self.opencode_command,
             AiBackend::Pi => &self.pi_command,
+            AiBackend::Codex => &self.codex_command,
         }
     }
 
@@ -150,6 +158,7 @@ impl Default for PtyConfig {
             claude_command: vec!["claude".to_string()],
             opencode_command: default_opencode_command(),
             pi_command: default_pi_command(),
+            codex_command: default_codex_command(),
             lazygit_command: vec!["lazygit".to_string()],
             scrollback_lines: 1000,
             auto_restart: true,

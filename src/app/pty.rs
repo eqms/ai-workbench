@@ -618,4 +618,21 @@ mod tests {
         let cmd = App::build_ai_command(&cfg, AiBackend::Pi, &base_opts());
         assert_eq!(cmd[0], "pi");
     }
+
+    #[test]
+    fn test_codex_backend_uses_own_command_without_claude_flags() {
+        let cfg = Config::default();
+        let opts = StartupOptions {
+            permission_mode: ClaudePermissionMode::Auto,
+            model: ClaudeModel::Opus,
+            effort: ClaudeEffort::High,
+            ..base_opts()
+        };
+        let cmd = App::build_ai_command(&cfg, AiBackend::Codex, &opts);
+        assert_eq!(cmd[0], "codex");
+        // Claude-only flags must never leak into non-Claude backends.
+        assert!(!cmd.iter().any(|a| a == "--permission-mode"));
+        assert!(!cmd.iter().any(|a| a == "--model"));
+        assert!(!cmd.iter().any(|a| a == "--effort"));
+    }
 }

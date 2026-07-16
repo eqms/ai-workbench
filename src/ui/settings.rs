@@ -110,6 +110,7 @@ pub enum SettingsField {
     LazygitPath,
     OpenCodeCommand,
     PiCommand,
+    CodexCommand,
     Browser,
     ExternalEditor,
     ExportDir,
@@ -213,6 +214,8 @@ pub struct SettingsState {
     pub opencode_command: String,
     /// Full command line for the Pi AI backend.
     pub pi_command: String,
+    /// Full command line for the Codex AI backend (e.g. `codex -s workspace-write`).
+    pub codex_command: String,
     pub browser: String,
     pub external_editor: String,
     pub export_dir: String,
@@ -276,6 +279,7 @@ impl Default for SettingsState {
             lazygit_path: "lazygit".to_string(),
             opencode_command: "opencode".to_string(),
             pi_command: "pi".to_string(),
+            codex_command: "codex".to_string(),
             browser: String::new(),
             external_editor: String::new(),
             export_dir: String::new(),
@@ -346,6 +350,7 @@ impl SettingsState {
         // Backend commands are full command lines (binary + args); join for editing.
         self.opencode_command = join_command(&config.pty.opencode_command, "opencode");
         self.pi_command = join_command(&config.pty.pi_command, "pi");
+        self.codex_command = join_command(&config.pty.codex_command, "codex");
         self.browser = config.ui.browser.clone();
         self.external_editor = config.ui.external_editor.clone();
         self.export_dir = config.ui.export_dir.clone();
@@ -396,6 +401,7 @@ impl SettingsState {
         // Split full command lines into argv; fall back to the bare binary.
         config.pty.opencode_command = split_command(&self.opencode_command, "opencode");
         config.pty.pi_command = split_command(&self.pi_command, "pi");
+        config.pty.codex_command = split_command(&self.codex_command, "codex");
         config.ui.browser = self.browser.clone();
         config.ui.external_editor = self.external_editor.clone();
         config.ui.export_dir = self.export_dir.clone();
@@ -470,7 +476,7 @@ impl SettingsState {
         match self.category {
             SettingsCategory::General => 6, // shell, scrollback, hidden, autosave, auto-refresh, check updates
             SettingsCategory::Layout => 4,  // file_browser, preview, right_panel, claude_height
-            SettingsCategory::Paths => 7, // claude, lazygit, opencode, pi, browser, external_editor, export_dir
+            SettingsCategory::Paths => 8, // claude, lazygit, opencode, pi, codex, browser, external_editor, export_dir
             SettingsCategory::Document => 23,
             SettingsCategory::Ssh => 3, // enabled, helper path, reset hint
             SettingsCategory::About => 0,
@@ -518,9 +524,10 @@ impl SettingsState {
                 1 => Some(SettingsField::LazygitPath),
                 2 => Some(SettingsField::OpenCodeCommand),
                 3 => Some(SettingsField::PiCommand),
-                4 => Some(SettingsField::Browser),
-                5 => Some(SettingsField::ExternalEditor),
-                6 => Some(SettingsField::ExportDir),
+                4 => Some(SettingsField::CodexCommand),
+                5 => Some(SettingsField::Browser),
+                6 => Some(SettingsField::ExternalEditor),
+                7 => Some(SettingsField::ExportDir),
                 _ => None,
             },
             SettingsCategory::Document => match self.selected_idx {
@@ -598,6 +605,7 @@ impl SettingsState {
                 SettingsField::LazygitPath => self.lazygit_path.clone(),
                 SettingsField::OpenCodeCommand => self.opencode_command.clone(),
                 SettingsField::PiCommand => self.pi_command.clone(),
+                SettingsField::CodexCommand => self.codex_command.clone(),
                 SettingsField::ExportDir => self.export_dir.clone(),
                 SettingsField::CompanyName => self.company_name.clone(),
                 SettingsField::CompanyFooterText => self.company_footer_text.clone(),
@@ -820,6 +828,7 @@ impl SettingsState {
                 SettingsField::LazygitPath => self.lazygit_path = value,
                 SettingsField::OpenCodeCommand => self.opencode_command = value,
                 SettingsField::PiCommand => self.pi_command = value,
+                SettingsField::CodexCommand => self.codex_command = value,
                 SettingsField::Browser => self.browser = value,
                 SettingsField::ExternalEditor => self.external_editor = value,
                 SettingsField::ExportDir => self.export_dir = value,
@@ -1150,24 +1159,31 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.editing.as_ref() == Some(&SettingsField::PiCommand),
             &state.input_buffer,
         ),
+        format_setting(
+            "Codex Command",
+            &state.codex_command,
+            state.selected_idx == 4,
+            state.editing.as_ref() == Some(&SettingsField::CodexCommand),
+            &state.input_buffer,
+        ),
         format_dropdown_setting(
             "Browser",
             &browser_display,
-            state.selected_idx == 4,
+            state.selected_idx == 5,
             state.editing.as_ref() == Some(&SettingsField::Browser),
             &state.input_buffer,
         ),
         format_dropdown_setting(
             "External Editor",
             &editor_display,
-            state.selected_idx == 5,
+            state.selected_idx == 6,
             state.editing.as_ref() == Some(&SettingsField::ExternalEditor),
             &state.input_buffer,
         ),
         format_setting(
             "Export Directory",
             &export_dir_display,
-            state.selected_idx == 6,
+            state.selected_idx == 7,
             state.editing.as_ref() == Some(&SettingsField::ExportDir),
             &state.input_buffer,
         ),
@@ -1578,8 +1594,8 @@ mod tests {
         let mut state = SettingsState::default();
         assert_eq!(state.item_count(), 6); // General is default
         state.category = SettingsCategory::Paths;
-        // Paths: claude, lazygit, opencode, pi, browser, external_editor, export_dir
-        assert_eq!(state.item_count(), 7);
+        // Paths: claude, lazygit, opencode, pi, codex, browser, external_editor, export_dir
+        assert_eq!(state.item_count(), 8);
     }
 
     #[test]

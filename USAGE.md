@@ -26,7 +26,7 @@
 | F5 | Toggle LazyGit (restarts in current directory) |
 | F6 | Toggle User Terminal (syncs to current directory) |
 | F7 | Claude Settings (~/.claude) |
-| F8 | Open the AI backend menu — a modal lists Claude / OpenCode / Pi with the active one marked. F8 or ↑↓/j k move the highlight, Enter switches (respawns the AI pane), Esc cancels |
+| F8 | Open the AI backend menu — a modal lists Claude / OpenCode / Pi / Codex with the active one marked. F8 or ↑↓/j k move the highlight, Enter switches (respawns the AI pane), Esc cancels |
 | Shift+F8 | Settings |
 | F9 | File Menu (File Browser) / Copy last command block (Terminal) or last N lines (Claude, LazyGit) |
 | Shift+F9 | Copy last N lines with interactive count input (Terminal panes) |
@@ -411,7 +411,7 @@ strategy with `CLAUDE_WORKBENCH_CLIPBOARD=osc52|arboard|subprocess`.
 | F5 | LazyGit umschalten (startet im aktuellen Verzeichnis neu) |
 | F6 | Benutzer-Terminal umschalten (wechselt ins aktuelle Verzeichnis) |
 | F7 | Claude Einstellungen (~/.claude) |
-| F8 | KI-Backend-Menü öffnen — ein Dialog listet Claude / OpenCode / Pi, das aktive ist markiert. F8 oder ↑↓/j k bewegen die Auswahl, Enter wechselt (startet den KI-Bereich neu), Esc bricht ab |
+| F8 | KI-Backend-Menü öffnen — ein Dialog listet Claude / OpenCode / Pi / Codex, das aktive ist markiert. F8 oder ↑↓/j k bewegen die Auswahl, Enter wechselt (startet den KI-Bereich neu), Esc bricht ab |
 | Shift+F8 | Einstellungen |
 | F9 | Datei-Menü (Dateibrowser) / Letzten Kommando-Block (Terminal) bzw. letzte N Zeilen (Claude, LazyGit) kopieren |
 | Shift+F9 | Letzte N Zeilen mit interaktiver Eingabe kopieren (Terminal-Bereiche) |

@@ -844,7 +844,7 @@ impl App {
                         self.wizard.selected_shell_idx += 1;
                     }
                 }
-                WizardStep::ClaudeConfig if self.wizard.focused_field < 3 => {
+                WizardStep::ClaudeConfig if self.wizard.focused_field < 4 => {
                     self.wizard.focused_field += 1;
                 }
                 _ => {}
@@ -857,12 +857,13 @@ impl App {
                         0 => WizardField::ClaudePath,
                         1 => WizardField::OpenCodePath,
                         2 => WizardField::PiPath,
+                        3 => WizardField::CodexPath,
                         _ => WizardField::LazygitPath,
                     };
                     self.wizard.start_editing(field);
                 }
             }
-            KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3')
+            KeyCode::Char('1') | KeyCode::Char('2') | KeyCode::Char('3') | KeyCode::Char('4')
                 if self.wizard.step == WizardStep::ClaudeConfig =>
             {
                 // Choose the default AI backend for argument-less launches.
@@ -870,7 +871,8 @@ impl App {
                 self.wizard.selected_backend = match code {
                     KeyCode::Char('1') => AiBackend::Claude,
                     KeyCode::Char('2') => AiBackend::OpenCode,
-                    _ => AiBackend::Pi,
+                    KeyCode::Char('3') => AiBackend::Pi,
+                    _ => AiBackend::Codex,
                 };
             }
             KeyCode::Char('m') | KeyCode::Char('M')

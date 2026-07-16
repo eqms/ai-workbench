@@ -64,6 +64,7 @@ pub enum WizardField {
     ClaudePath,
     OpenCodePath,
     PiPath,
+    CodexPath,
     LazygitPath,
     ShellPath,
 }
@@ -80,6 +81,7 @@ pub struct WizardState {
     pub claude_path: String,
     pub opencode_path: String,
     pub pi_path: String,
+    pub codex_path: String,
     pub lazygit_path: String,
     /// The AI backend chosen as the default for argument-less launches.
     pub selected_backend: AiBackend,
@@ -147,6 +149,12 @@ impl Default for WizardState {
                 .as_ref()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|| "pi".to_string()),
+            codex_path: deps
+                .codex_cli
+                .path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "codex".to_string()),
             selected_backend: AiBackend::default(),
             lazygit_path: deps
                 .lazygit
@@ -253,6 +261,7 @@ impl WizardState {
             WizardField::ClaudePath => self.claude_path.clone(),
             WizardField::OpenCodePath => self.opencode_path.clone(),
             WizardField::PiPath => self.pi_path.clone(),
+            WizardField::CodexPath => self.codex_path.clone(),
             WizardField::LazygitPath => self.lazygit_path.clone(),
             WizardField::ShellPath => self
                 .available_shells
@@ -269,6 +278,7 @@ impl WizardState {
                 WizardField::ClaudePath => self.claude_path = value,
                 WizardField::OpenCodePath => self.opencode_path = value,
                 WizardField::PiPath => self.pi_path = value,
+                WizardField::CodexPath => self.codex_path = value,
                 WizardField::LazygitPath => self.lazygit_path = value,
                 WizardField::ShellPath => {
                     // Add custom shell to list if not present
@@ -308,6 +318,7 @@ impl WizardState {
         config.pty.claude_command = vec![self.claude_path.clone()];
         config.pty.opencode_command = vec![self.opencode_path.clone()];
         config.pty.pi_command = vec![self.pi_path.clone()];
+        config.pty.codex_command = vec![self.codex_path.clone()];
         config.pty.lazygit_command = vec![self.lazygit_path.clone()];
 
         // SSH-image-paste: persist detected helper path and dismissed flag
@@ -365,9 +376,11 @@ mod tests {
     fn test_generate_config() {
         let mut state = WizardState::default();
         state.claude_path = "/usr/local/bin/claude".to_string();
+        state.codex_path = "/usr/local/bin/codex".to_string();
         let config = state.generate_config();
         assert!(config.setup.wizard_completed);
         assert_eq!(config.pty.claude_command, vec!["/usr/local/bin/claude"]);
+        assert_eq!(config.pty.codex_command, vec!["/usr/local/bin/codex"]);
     }
 
     #[test]

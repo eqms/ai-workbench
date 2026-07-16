@@ -47,6 +47,7 @@ pub struct DependencyReport {
     pub claude_cli: DependencyStatus,
     pub opencode_cli: DependencyStatus,
     pub pi_cli: DependencyStatus,
+    pub codex_cli: DependencyStatus,
     pub lazygit: DependencyStatus,
     pub shells: Vec<DependencyStatus>,
     pub clipboard_helpers: ClipboardHelpers,
@@ -60,6 +61,7 @@ impl DependencyReport {
             claude_cli: check_command("claude", &["--version"], false),
             opencode_cli: check_command("opencode", &["--version"], false),
             pi_cli: check_command("pi", &["--version"], false),
+            codex_cli: check_command("codex", &["--version"], false),
             lazygit: check_command("lazygit", &["--version"], false),
             shells: check_available_shells(),
             clipboard_helpers: ClipboardHelpers {
@@ -84,6 +86,7 @@ impl DependencyReport {
             AiBackend::Claude => &self.claude_cli,
             AiBackend::OpenCode => &self.opencode_cli,
             AiBackend::Pi => &self.pi_cli,
+            AiBackend::Codex => &self.codex_cli,
         }
     }
 

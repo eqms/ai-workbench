@@ -13,7 +13,7 @@
 
 A Rust-based TUI (Terminal User Interface) multiplexer designed for AI-assisted development workflows. Provides an integrated development environment with file browser, syntax-highlighted preview pane, and multiple embedded PTY terminals.
 
-The primary (AI) pane is **backend-selectable** — launch it with Claude Code, OpenCode, or Pi via a single startup argument (`ai-workbench claude|opencode|pi`). The chosen backend is remembered across runs; every other pane stays identical.
+The primary (AI) pane is **backend-selectable** — launch it with Claude Code, OpenCode, Pi, or Codex via a single startup argument (`ai-workbench claude|opencode|pi|codex`). The chosen backend is remembered across runs; every other pane stays identical.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)
@@ -48,7 +48,7 @@ No overhead. Maximum performance. Built by a developer, for developers.
 |------|-----|-------------|
 | **File Browser** | F1 | Navigate directories, git status integration, file operations (F9), toggle visibility |
 | **Preview** | F2 | Syntax highlighting (500+ languages), Markdown rendering, built-in editor |
-| **AI Agent** | F4 | Embedded AI CLI — Claude Code, OpenCode, or Pi (selected at launch); Claude mode adds startup prefixes |
+| **AI Agent** | F4 | Embedded AI CLI — Claude Code, OpenCode, Pi, or Codex (selected at launch); Claude mode adds startup prefixes |
 | **LazyGit** | F5 | Integrated Git TUI (restarts in current directory) |
 | **Terminal** | F6 | General-purpose shell (syncs to current directory) |
 
@@ -60,19 +60,21 @@ AI Workbench drives one AI coding agent in its primary pane, chosen with a posit
 ai-workbench claude     # Anthropic Claude Code CLI (default)
 ai-workbench opencode   # OpenCode CLI
 ai-workbench pi         # Pi CLI
+ai-workbench codex      # OpenAI Codex CLI
 ```
 
 - The backend name is case-insensitive; an unknown value exits with an error.
 - Without an argument, the **last-used backend is resumed** (first-run default: `claude`), persisted to `~/.config/ai-workbench/session.yaml`.
-- **Switch the backend at runtime with `F8`** — it cycles Claude → OpenCode → Pi, respawns the AI pane, and persists the choice. (`Shift+F8` opens Settings.)
-- Each backend's command is configurable via `pty.claude_command` / `pty.opencode_command` / `pty.pi_command`. The **OpenCode** and **Pi** commands take a full command line with arguments — e.g. `opencode --model glm-5.2:cloud` — and are editable in **Settings (Shift+F8) → Paths** ("OpenCode Command" / "Pi Command") as well as in `config.yaml`:
+- **Switch the backend at runtime with `F8`** — a menu lists Claude / OpenCode / Pi / Codex, respawns the AI pane on switch, and persists the choice. (`Shift+F8` opens Settings.)
+- Each backend's command is configurable via `pty.claude_command` / `pty.opencode_command` / `pty.pi_command` / `pty.codex_command`. The **OpenCode**, **Pi**, and **Codex** commands take a full command line with arguments — e.g. `opencode --model glm-5.2:cloud` or `codex -s workspace-write` — and are editable in **Settings (Shift+F8) → Paths** ("OpenCode Command" / "Pi Command" / "Codex Command") as well as in `config.yaml`:
   ```yaml
   pty:
     opencode_command: ["opencode", "--model", "glm-5.2:cloud"]
     pi_command: ["pi"]
+    codex_command: ["codex", "-s", "workspace-write"]
   ```
-- Claude-specific flags (permission mode, model, effort, session, worktree) and the permission/startup dialogs apply **only** in Claude mode. The Model options `Fable`/`Opus`/`Sonnet`/`Haiku` map to the CLI `--model` aliases (always newest of each tier).
-- The first-run wizard checks all three CLIs, lets you set each path, and pick the default backend.
+- Claude-specific flags (permission mode, model, effort, session, worktree) and the permission/startup dialogs apply **only** in Claude mode. The Model options `Fable`/`Opus`/`Sonnet`/`Haiku` map to the CLI `--model` aliases (always newest of each tier). Codex starts directly — pass its flags (`-s`, `-a`, `-m`, `--search`) via `pty.codex_command`.
+- The first-run wizard checks all four CLIs, lets you set each path, and pick the default backend.
 
 **Highlights:**
 - Full PTY emulation with 256-color support and 1000-line scrollback
@@ -255,13 +257,15 @@ AI Workbench betreibt im primären Panel einen AI-Coding-Agenten, der per Startp
 ai-workbench claude     # Anthropic Claude Code CLI (Standard)
 ai-workbench opencode   # OpenCode CLI
 ai-workbench pi         # Pi CLI
+ai-workbench codex      # OpenAI Codex CLI
 ```
 
 - Der Backend-Name ist case-insensitiv; ein unbekannter Wert beendet mit Fehler.
 - Ohne Parameter wird das **zuletzt genutzte Backend fortgesetzt** (Standard beim ersten Start: `claude`), gespeichert in `~/.config/ai-workbench/session.yaml`.
-- Jedes Backend-Kommando ist über `pty.claude_command` / `pty.opencode_command` / `pty.pi_command` konfigurierbar.
-- Claude-spezifische Flags (Permission-Mode, Model, Effort, Session, Worktree, Remote-Control) sowie die Permission-/Startup-Dialoge greifen **nur** im Claude-Modus.
-- Der Ersteinrichtungs-Assistent prüft alle drei CLIs, lässt jeden Pfad setzen und das Standard-Backend wählen.
+- **Backend-Wechsel zur Laufzeit mit `F8`** — ein Menü listet Claude / OpenCode / Pi / Codex, der Wechsel startet den KI-Bereich neu und wird persistiert. (`Shift+F8` öffnet die Settings.)
+- Jedes Backend-Kommando ist über `pty.claude_command` / `pty.opencode_command` / `pty.pi_command` / `pty.codex_command` konfigurierbar (z. B. `codex_command: ["codex", "-s", "workspace-write"]`), editierbar auch in **Settings (Shift+F8) → Paths**.
+- Claude-spezifische Flags (Permission-Mode, Model, Effort, Session, Worktree, Remote-Control) sowie die Permission-/Startup-Dialoge greifen **nur** im Claude-Modus. Codex startet direkt — eigene Flags (`-s`, `-a`, `-m`, `--search`) über `pty.codex_command`.
+- Der Ersteinrichtungs-Assistent prüft alle vier CLIs, lässt jeden Pfad setzen und das Standard-Backend wählen.
 
 **Highlights:**
 - Volle PTY-Emulation mit 256-Farben und 1000 Zeilen Scrollback
