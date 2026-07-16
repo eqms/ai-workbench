@@ -534,8 +534,16 @@ fn help_content() -> Vec<Line<'static>> {
         Line::from(""),
         Line::from("  All keys map to PTY (shell input)."),
         Line::from(vec![
+            Span::styled("  Shift+Enter  ", Style::default().fg(Color::Cyan)),
+            Span::raw("Insert newline in AI pane (F4) — needs kitty keyboard protocol (iTerm2 3.5+, Kitty, WezTerm, Ghostty)"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Alt+Enter    ", Style::default().fg(Color::Cyan)),
+            Span::raw("Insert newline in AI pane (F4)"),
+        ]),
+        Line::from(vec![
             Span::styled("  \\ + Enter   ", Style::default().fg(Color::Cyan)),
-            Span::raw("Insert newline in Claude Code (F4)"),
+            Span::raw("Insert newline in Claude Code (F4) — universal fallback"),
         ]),
         Line::from(vec![
             Span::styled("  Shift+PgUp   ", Style::default().fg(Color::Cyan)),

@@ -131,7 +131,7 @@ impl App {
     /// PTY. No-op if the key has no PTY mapping or the pane has no PTY.
     pub(super) fn forward_key_to_active_pty(&mut self, key: KeyEvent) {
         if let Some(pty) = self.terminals.get_mut(&self.active_pane) {
-            if let Some(bytes) = crate::input::map_key_to_pty(key) {
+            if let Some(bytes) = crate::input::map_key_to_pty(key, self.active_pane) {
                 let _ = pty.write_input(&bytes);
             }
         }

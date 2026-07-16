@@ -168,8 +168,11 @@ fn run_update_to_version_cli(target_version: &str) -> Result<()> {
 
 /// Restore terminal to normal state - called on exit, panic, or signal
 fn restore_terminal() {
+    // Pop is safe even when the enhancement flags were never pushed —
+    // terminals without kitty-protocol support ignore the sequence.
     let _ = crossterm::execute!(
         std::io::stdout(),
+        crossterm::event::PopKeyboardEnhancementFlags,
         crossterm::event::DisableMouseCapture,
         crossterm::event::DisableBracketedPaste,
         crossterm::terminal::LeaveAlternateScreen,
@@ -524,6 +527,20 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
         crossterm::event::EnableMouseCapture,
         crossterm::event::EnableBracketedPaste
     )?;
+
+    // Kitty keyboard protocol: makes Shift+Enter distinguishable from plain
+    // Enter (needed for newline insertion in the AI pane). The probe requires
+    // raw mode (enabled by ratatui::init above) and may block up to ~2s on
+    // terminals that never answer. No-op on unsupported terminals — legacy
+    // key reporting stays in effect and behavior is unchanged.
+    if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::event::PushKeyboardEnhancementFlags(
+                crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+            )
+        );
+    }
 
     let app = App::new(config, session, fake_version, backend);
 

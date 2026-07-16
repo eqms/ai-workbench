@@ -111,7 +111,9 @@ Note: `Ctrl+C` and `Ctrl+X` without an active selection operate on the current l
 #### Terminal Panes
 | Key | Action |
 |-----|--------|
-| \\ + Enter | Insert newline in Claude Code (F4) |
+| Shift+Enter | Insert newline in AI pane (F4) — requires kitty keyboard protocol support in your terminal (iTerm2 3.5+, Kitty, WezTerm, Ghostty, Alacritty ≥0.13) |
+| Alt+Enter | Insert newline in AI pane (F4) |
+| \\ + Enter | Insert newline in Claude Code (F4) — universal fallback for terminals without Shift+Enter support (e.g. Terminal.app) |
 | Ctrl+S | Start selection |
 | F9 | Copy last command block (Terminal, full scrollback) or last N visible lines (Claude/LazyGit, N = `pty.copy_lines_count`, default 50) |
 | Shift+F9 | Copy last N lines with interactive count input |
@@ -498,7 +500,9 @@ Ziehen Sie Bereichsgrenzen zum interaktiven Ändern der Größe. Änderungen wer
 #### Terminal-Bereiche
 | Taste | Aktion |
 |-------|--------|
-| \\ + Enter | Zeilenumbruch im Claude Code (F4) |
+| Shift+Enter | Zeilenumbruch im KI-Bereich (F4) — benötigt Kitty-Keyboard-Protokoll im Terminal (iTerm2 3.5+, Kitty, WezTerm, Ghostty, Alacritty ≥0.13) |
+| Alt+Enter | Zeilenumbruch im KI-Bereich (F4) |
+| \\ + Enter | Zeilenumbruch im Claude Code (F4) — universeller Fallback für Terminals ohne Shift+Enter-Unterstützung (z. B. Terminal.app) |
 | Ctrl+S | Auswahl starten |
 | F9 | Letzten Kommando-Block (Terminal, voller Scrollback) bzw. letzte N sichtbare Zeilen (Claude/LazyGit, N = `pty.copy_lines_count`, Standard 50) kopieren |
 | Shift+F9 | Letzte N Zeilen mit interaktiver Eingabe kopieren |

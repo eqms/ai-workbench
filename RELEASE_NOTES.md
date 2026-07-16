@@ -1,5 +1,15 @@
 # Release Notes
 
+## Version 1.7.0 (16.07.2026)
+
+### Added
+
+- **[ADD] Shift+Enter inserts a newline in the AI pane (F4).** The workbench now pushes the kitty keyboard protocol flag `DISAMBIGUATE_ESCAPE_CODES` at startup (guarded by `supports_keyboard_enhancement()`, popped in `restore_terminal()`), so terminals that support the protocol (iTerm2 3.5+, Kitty, WezTerm, Ghostty, Alacritty ≥0.13) report Shift+Enter as a distinct key event. `map_key_to_pty` translates it to `ESC+CR`, which Claude Code and OpenCode interpret as "insert newline" in legacy keyboard mode — the mode the inner PTY always runs in, since the vt100 parser never answers kitty-protocol queries. Scoped to the AI pane only (shell/LazyGit behavior unchanged). On terminals without protocol support (e.g. Terminal.app) nothing changes; the `\` + Enter fallback keeps working everywhere. 6 new unit tests in `src/input.rs`.
+
+### Fixed
+
+- **[FIX] Alt/Option+Enter now inserts a newline in the AI pane.** Previously the ALT branch in `map_key_to_pty` only handled word navigation (Left/Right); Alt+Enter fell through to plain `\r`, silently dropping the ESC prefix. It is now mapped to `ESC+CR` in all PTY panes — this works even without kitty-protocol support.
+
 ## Version 1.6.0 (11.07.2026)
 
 ### Added

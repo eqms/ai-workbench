@@ -1,7 +1,27 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-pub fn map_key_to_pty(key: KeyEvent) -> Option<Vec<u8>> {
+use crate::types::PaneId;
+
+/// Translate a crossterm key event into the byte sequence to write to a PTY.
+/// Pane-agnostic except for one documented asymmetry: Shift+Enter is only
+/// remapped in the AI pane (see below).
+pub fn map_key_to_pty(key: KeyEvent, pane: PaneId) -> Option<Vec<u8>> {
     let mut bytes = Vec::new();
+
+    // Shift+Enter (AI pane only) and Alt+Enter (any pane) → ESC+CR.
+    // Claude Code / OpenCode interpret ESC+CR as "insert newline" in legacy
+    // keyboard mode — the mode the inner PTY always runs in, since the vt100
+    // parser never answers kitty-protocol queries. SHIFT on Enter only
+    // arrives when the outer terminal supports DISAMBIGUATE_ESCAPE_CODES
+    // (pushed in main.rs); without it this branch is unreachable and the
+    // `\` + Enter fallback stays the only path. Shell/LazyGit panes don't
+    // treat ESC+CR as newline, so Shift+Enter is left alone there.
+    if key.code == KeyCode::Enter
+        && (key.modifiers.contains(KeyModifiers::ALT)
+            || (pane == PaneId::Claude && key.modifiers.contains(KeyModifiers::SHIFT)))
+    {
+        return Some(vec![0x1b, b'\r']);
+    }
 
     // Handle Alt + Arrow keys for word navigation
     if key.modifiers.contains(KeyModifiers::ALT) {
@@ -76,4 +96,72 @@ pub fn map_key_to_pty(key: KeyEvent) -> Option<Vec<u8>> {
     }
 
     Some(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, modifiers)
+    }
+
+    #[test]
+    fn shift_enter_claude_pane_inserts_newline_escape() {
+        let k = key(KeyCode::Enter, KeyModifiers::SHIFT);
+        assert_eq!(map_key_to_pty(k, PaneId::Claude), Some(vec![0x1b, b'\r']));
+    }
+
+    #[test]
+    fn shift_enter_terminal_and_lazygit_panes_unchanged() {
+        let k = key(KeyCode::Enter, KeyModifiers::SHIFT);
+        assert_eq!(map_key_to_pty(k, PaneId::Terminal), Some(vec![b'\r']));
+        assert_eq!(map_key_to_pty(k, PaneId::LazyGit), Some(vec![b'\r']));
+    }
+
+    #[test]
+    fn alt_enter_inserts_newline_escape_in_any_pane() {
+        let k = key(KeyCode::Enter, KeyModifiers::ALT);
+        assert_eq!(map_key_to_pty(k, PaneId::Claude), Some(vec![0x1b, b'\r']));
+        assert_eq!(map_key_to_pty(k, PaneId::Terminal), Some(vec![0x1b, b'\r']));
+    }
+
+    #[test]
+    fn plain_enter_unchanged() {
+        let k = key(KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(map_key_to_pty(k, PaneId::Claude), Some(vec![b'\r']));
+    }
+
+    // Regression guard for the DISAMBIGUATE_ESCAPE_CODES rollout: the
+    // legacy-ambiguous control combos must keep producing the same single
+    // control byte regardless of how the outer terminal reports them.
+    #[test]
+    fn ctrl_letter_combos_produce_legacy_control_bytes() {
+        let cases = [('h', 8u8), ('i', 9), ('m', 13)];
+        for (c, byte) in cases {
+            assert_eq!(
+                map_key_to_pty(key(KeyCode::Char(c), KeyModifiers::CONTROL), PaneId::Claude),
+                Some(vec![byte])
+            );
+        }
+        assert_eq!(
+            map_key_to_pty(
+                key(KeyCode::Char('['), KeyModifiers::CONTROL),
+                PaneId::Claude
+            ),
+            Some(vec![27])
+        );
+    }
+
+    #[test]
+    fn alt_left_right_word_nav_still_works() {
+        assert_eq!(
+            map_key_to_pty(key(KeyCode::Left, KeyModifiers::ALT), PaneId::Claude),
+            Some(vec![0x1b, b'b'])
+        );
+        assert_eq!(
+            map_key_to_pty(key(KeyCode::Right, KeyModifiers::ALT), PaneId::Claude),
+            Some(vec![0x1b, b'f'])
+        );
+    }
 }
