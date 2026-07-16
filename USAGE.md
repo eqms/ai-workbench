@@ -111,8 +111,9 @@ Note: `Ctrl+C` and `Ctrl+X` without an active selection operate on the current l
 #### Terminal Panes
 | Key | Action |
 |-----|--------|
-| Shift+Enter | Insert newline in AI pane (F4) — requires kitty keyboard protocol support in your terminal (iTerm2 3.5+, Kitty, WezTerm, Ghostty, Alacritty ≥0.13) |
+| Shift+Enter | Insert newline in AI pane (F4) — requires kitty keyboard protocol support in your terminal (iTerm2 3.5+, Kitty, WezTerm, Ghostty, Alacritty ≥0.13). Also works when an iTerm2 key binding from Claude Code's `/terminal-setup` intercepts the key (it sends a bare LF, which the AI pane maps to a newline since v1.7.1). Troubleshoot with `ai-workbench --key-diag` |
 | Alt+Enter | Insert newline in AI pane (F4) |
+| Ctrl+J | Insert newline in AI pane (F4) |
 | \\ + Enter | Insert newline in Claude Code (F4) — universal fallback for terminals without Shift+Enter support (e.g. Terminal.app) |
 | Ctrl+S | Start selection |
 | F9 | Copy last command block (Terminal, full scrollback) or last N visible lines (Claude/LazyGit, N = `pty.copy_lines_count`, default 50) |
@@ -500,8 +501,9 @@ Ziehen Sie Bereichsgrenzen zum interaktiven Ändern der Größe. Änderungen wer
 #### Terminal-Bereiche
 | Taste | Aktion |
 |-------|--------|
-| Shift+Enter | Zeilenumbruch im KI-Bereich (F4) — benötigt Kitty-Keyboard-Protokoll im Terminal (iTerm2 3.5+, Kitty, WezTerm, Ghostty, Alacritty ≥0.13) |
+| Shift+Enter | Zeilenumbruch im KI-Bereich (F4) — benötigt Kitty-Keyboard-Protokoll im Terminal (iTerm2 3.5+, Kitty, WezTerm, Ghostty, Alacritty ≥0.13). Funktioniert seit v1.7.1 auch, wenn ein iTerm2-Keybinding aus Claude Codes `/terminal-setup` die Taste abfängt (sendet nacktes LF, das der KI-Bereich als Zeilenumbruch abbildet). Diagnose: `ai-workbench --key-diag` |
 | Alt+Enter | Zeilenumbruch im KI-Bereich (F4) |
+| Ctrl+J | Zeilenumbruch im KI-Bereich (F4) |
 | \\ + Enter | Zeilenumbruch im Claude Code (F4) — universeller Fallback für Terminals ohne Shift+Enter-Unterstützung (z. B. Terminal.app) |
 | Ctrl+S | Auswahl starten |
 | F9 | Letzten Kommando-Block (Terminal, voller Scrollback) bzw. letzte N sichtbare Zeilen (Claude/LazyGit, N = `pty.copy_lines_count`, Standard 50) kopieren |

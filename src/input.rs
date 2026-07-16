@@ -23,6 +23,20 @@ pub fn map_key_to_pty(key: KeyEvent, pane: PaneId) -> Option<Vec<u8>> {
         return Some(vec![0x1b, b'\r']);
     }
 
+    // Ctrl+J / bare LF (AI pane only) → ESC+CR. Two sources produce this event:
+    // (a) a real Ctrl+J press — Claude Code's own "insert newline" shortcut,
+    // (b) a bare 0x0a byte, which crossterm parses as Ctrl+J in raw mode. The
+    // iTerm2 key binding installed by Claude Code's `/terminal-setup` (GlobalKeyMap
+    // "Shift+Enter → Send Text: \n") sends exactly that byte, bypassing the kitty
+    // protocol entirely. Forwarding 0x0a to the inner PTY makes legacy-mode CLIs
+    // treat it like Enter (submit); ESC+CR keeps the intended newline semantics.
+    if pane == PaneId::Claude
+        && key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('j') | KeyCode::Char('J'))
+    {
+        return Some(vec![0x1b, b'\r']);
+    }
+
     // Handle Alt + Arrow keys for word navigation
     if key.modifiers.contains(KeyModifiers::ALT) {
         match key.code {
@@ -151,6 +165,21 @@ mod tests {
             ),
             Some(vec![27])
         );
+    }
+
+    #[test]
+    fn ctrl_j_claude_pane_inserts_newline_escape() {
+        // Real Ctrl+J press and the bare-LF byte from iTerm2's /terminal-setup
+        // key binding both arrive as Char('j')+CONTROL in raw mode.
+        let k = key(KeyCode::Char('j'), KeyModifiers::CONTROL);
+        assert_eq!(map_key_to_pty(k, PaneId::Claude), Some(vec![0x1b, b'\r']));
+    }
+
+    #[test]
+    fn ctrl_j_terminal_and_lazygit_panes_keep_control_byte() {
+        let k = key(KeyCode::Char('j'), KeyModifiers::CONTROL);
+        assert_eq!(map_key_to_pty(k, PaneId::Terminal), Some(vec![0x0a]));
+        assert_eq!(map_key_to_pty(k, PaneId::LazyGit), Some(vec![0x0a]));
     }
 
     #[test]

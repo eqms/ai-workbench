@@ -1,5 +1,15 @@
 # Release Notes
 
+## Version 1.7.1 (16.07.2026)
+
+### Fixed
+
+- **[FIX] Shift+Enter now also inserts a newline when a terminal key binding intercepts it (iTerm2 `/terminal-setup`).** Root cause of "Shift+Enter still submits" on iTerm2 despite v1.7.0: Claude Code's `/terminal-setup` installs a **global iTerm2 key binding** (`GlobalKeyMap`, `0xd-0x20000` → "Send Text: `\n`") that fires *before* the kitty keyboard protocol, so the workbench never sees `CSI 13;2u` — only a bare LF (`0x0a`). Two-part fix: (1) `main.rs` now calls the direct crossterm 0.28 `enable_raw_mode()` after `ratatui::init()` — ratatui 0.30 enables raw mode through its own transitive crossterm 0.29, leaving 0.28's raw-mode bookkeeping stale, which made its parser map bare LF to `Enter` (submit) instead of `Ctrl+J`; the call is a termios no-op but fixes the bookkeeping. (2) `map_key_to_pty` maps `Ctrl+J` (= bare LF in raw mode) in the AI pane to `ESC+CR` (insert newline) — this also repairs Claude Code's own documented Ctrl+J newline shortcut inside the workbench, which previously submitted because the inner PTY runs in legacy keyboard mode. Verified end-to-end with a PTY harness simulating a kitty-protocol terminal: `CSI 13;2u` → `ESC+CR`, bare LF → `ESC+CR`, plain Enter → `CR` (submit) unchanged. 2 new unit tests in `src/input.rs`.
+
+### Added
+
+- **[ADD] `--key-diag` CLI flag.** Interactive keyboard diagnostic (pattern of `--clipboard-diag`): prints terminal markers (`TERM_PROGRAM`, `TMUX`, …), probes kitty-keyboard-protocol support, pushes `DISAMBIGUATE_ESCAPE_CODES`, then echoes every key event the terminal delivers. Pressing Shift+Enter shows immediately whether it arrives as a distinct key, a plain Enter (no protocol support), or a bare LF (a key binding intercepts it — with a pointer to the iTerm2 `/terminal-setup` GlobalKeyMap entry). The startup probe result is now also written to `update.log` (`kitty keyboard probe: …`) instead of failing silently.
+
 ## Version 1.7.0 (16.07.2026)
 
 ### Added

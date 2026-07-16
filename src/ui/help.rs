@@ -542,6 +542,10 @@ fn help_content() -> Vec<Line<'static>> {
             Span::raw("Insert newline in AI pane (F4)"),
         ]),
         Line::from(vec![
+            Span::styled("  Ctrl+J       ", Style::default().fg(Color::Cyan)),
+            Span::raw("Insert newline in AI pane (F4) — troubleshoot with `ai-workbench --key-diag`"),
+        ]),
+        Line::from(vec![
             Span::styled("  \\ + Enter   ", Style::default().fg(Color::Cyan)),
             Span::raw("Insert newline in Claude Code (F4) — universal fallback"),
         ]),

@@ -81,6 +81,14 @@ struct Args {
     /// Use when `o` / `Ctrl+X` export doesn't reach your Mac over SSH.
     #[arg(long)]
     open_diag: bool,
+
+    /// Diagnose keyboard input for the AI pane and exit (without starting the
+    /// TUI). Probes kitty-keyboard-protocol support, then echoes every key
+    /// event the terminal actually delivers. Use when Shift+Enter submits
+    /// instead of inserting a newline: press Shift+Enter in the diagnostic to
+    /// see whether the terminal reports it (or a key binding intercepts it).
+    #[arg(long)]
+    key_diag: bool,
 }
 
 /// Run update check from CLI and exit
@@ -408,6 +416,130 @@ fn run_open_diag_cli() -> Result<()> {
     Ok(())
 }
 
+/// Run keyboard input diagnostic from CLI and exit.
+///
+/// Probes kitty-keyboard-protocol support (the mechanism behind Shift+Enter
+/// newline insertion in the AI pane), pushes the same enhancement flags the
+/// TUI uses, then echoes every key event crossterm delivers so the user can
+/// see what their terminal actually sends. Detects the classic failure mode
+/// where an iTerm2 key binding (installed by Claude Code's `/terminal-setup`)
+/// intercepts Shift+Enter and sends a bare LF instead.
+fn run_key_diag_cli() -> Result<()> {
+    use crossterm::event::{
+        Event, KeyCode, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    };
+    use std::time::{Duration, Instant};
+
+    println!(
+        "ai-workbench v{} — key input diagnostic (Shift+Enter)",
+        env!("CARGO_PKG_VERSION")
+    );
+    println!();
+
+    let env_str = |k: &str| std::env::var(k).unwrap_or_else(|_| "(unset)".to_string());
+    println!("Terminal markers:");
+    println!("    TERM                 = {}", env_str("TERM"));
+    println!("    TERM_PROGRAM         = {}", env_str("TERM_PROGRAM"));
+    println!(
+        "    TERM_PROGRAM_VERSION = {}",
+        env_str("TERM_PROGRAM_VERSION")
+    );
+    println!("    LC_TERMINAL          = {}", env_str("LC_TERMINAL"));
+    println!("    TMUX                 = {}", env_str("TMUX"));
+    println!("    SSH_TTY              = {}", env_str("SSH_TTY"));
+    println!();
+
+    crossterm::terminal::enable_raw_mode()?;
+
+    // Ensure raw mode and pushed flags are undone even on early return.
+    struct RawGuard {
+        pushed: bool,
+    }
+    impl Drop for RawGuard {
+        fn drop(&mut self) {
+            if self.pushed {
+                let _ = crossterm::execute!(std::io::stdout(), PopKeyboardEnhancementFlags);
+            }
+            let _ = crossterm::terminal::disable_raw_mode();
+        }
+    }
+    let mut guard = RawGuard { pushed: false };
+
+    let support = crossterm::terminal::supports_keyboard_enhancement();
+    match &support {
+        Ok(true) => {
+            print!("Kitty keyboard protocol: ✓ supported — pushing DISAMBIGUATE_ESCAPE_CODES\r\n")
+        }
+        Ok(false) => print!(
+            "Kitty keyboard protocol: ✗ NOT supported (terminal answered the probe negatively)\r\n"
+        ),
+        Err(e) => print!(
+            "Kitty keyboard protocol: ✗ probe failed: {} (no answer within 2s)\r\n",
+            e
+        ),
+    }
+    if matches!(support, Ok(true)) {
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
+        guard.pushed = true;
+    }
+    print!("\r\n");
+    print!(
+        "Press keys to inspect them — try Shift+Enter. Esc or q quits (auto-exit after 30s).\r\n"
+    );
+    print!("\r\n");
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while Instant::now() < deadline {
+        if !crossterm::event::poll(Duration::from_millis(250))? {
+            continue;
+        }
+        let Event::Key(k) = crossterm::event::read()? else {
+            continue;
+        };
+        if k.kind != KeyEventKind::Press {
+            continue;
+        }
+        print!("  key: {:?}  modifiers: {:?}\r\n", k.code, k.modifiers);
+        match (k.code, k.modifiers) {
+            (KeyCode::Enter, m) if m.contains(KeyModifiers::SHIFT) => {
+                print!(
+                    "  ✅ Shift+Enter arrives correctly — the AI pane will insert a newline.\r\n"
+                );
+            }
+            (KeyCode::Enter, m) if m == KeyModifiers::NONE => {
+                print!("  ○ plain Enter (submit). If you pressed SHIFT+Enter and see this,\r\n");
+                print!(
+                    "    the terminal does not report the Shift modifier (no kitty protocol).\r\n"
+                );
+            }
+            (KeyCode::Char('j'), m) | (KeyCode::Char('J'), m)
+                if m.contains(KeyModifiers::CONTROL) =>
+            {
+                print!("  ⚠ bare LF / Ctrl+J received. If you pressed Shift+Enter, a terminal\r\n");
+                print!(
+                    "    key binding intercepts it (iTerm2: Settings → Keys → Key Bindings,\r\n"
+                );
+                print!(
+                    "    entry \"⇧↩ → Send Text: \\n\" from Claude Code's /terminal-setup).\r\n"
+                );
+                print!("    The AI pane maps this to a newline anyway since v1.7.1.\r\n");
+            }
+            (KeyCode::Esc, _) | (KeyCode::Char('q'), KeyModifiers::NONE) => {
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    drop(guard);
+    println!();
+    Ok(())
+}
+
 fn main() -> Result<()> {
     // Parse args early - before tokio runtime
     let args = Args::parse();
@@ -443,6 +575,11 @@ fn main() -> Result<()> {
     // Handle --open-diag CLI mode (exit without starting TUI)
     if args.open_diag {
         return run_open_diag_cli();
+    }
+
+    // Handle --key-diag CLI mode (exit without starting TUI)
+    if args.key_diag {
+        return run_key_diag_cli();
     }
 
     // Validate the positional backend argument early, before spinning up the
@@ -522,6 +659,14 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
     }
 
     let terminal = ratatui::init();
+    // ratatui::init() enables raw mode through ratatui-crossterm's own
+    // crossterm 0.29, so the direct crossterm 0.28 dependency (which runs the
+    // event loop and its input parser) still believes the terminal is cooked.
+    // Its parser then maps a bare LF (0x0a) to Enter instead of Ctrl+J,
+    // breaking the AI-pane newline mapping for terminals/key bindings that
+    // send LF (e.g. iTerm2's /terminal-setup Shift+Enter binding). Enabling
+    // raw mode here is a termios no-op but fixes 0.28's bookkeeping.
+    crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(
         std::io::stdout(),
         crossterm::event::EnableMouseCapture,
@@ -532,8 +677,12 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
     // Enter (needed for newline insertion in the AI pane). The probe requires
     // raw mode (enabled by ratatui::init above) and may block up to ~2s on
     // terminals that never answer. No-op on unsupported terminals — legacy
-    // key reporting stays in effect and behavior is unchanged.
-    if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
+    // key reporting stays in effect and behavior is unchanged. The result is
+    // logged (update.log) because a failed probe silently disables Shift+Enter;
+    // `--key-diag` gives an interactive view of the same probe.
+    let kitty_probe = crossterm::terminal::supports_keyboard_enhancement();
+    update::log_update(&format!("kitty keyboard probe: {:?}", kitty_probe));
+    if kitty_probe.unwrap_or(false) {
         let _ = crossterm::execute!(
             std::io::stdout(),
             crossterm::event::PushKeyboardEnhancementFlags(
