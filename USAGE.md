@@ -356,6 +356,11 @@ ui:
 "AI WORKBENCH" logo at startup. Press any key or click to skip it; set to
 `false` to disable it entirely (e.g. on slow or headless systems).
 
+While the terminal is being probed and the panes spawn, a static boot screen
+(wordmark, version, and a status line such as "probing terminal...") appears
+immediately — there is no black screen before the intro. The boot screen is
+always shown and is independent of `intro_animation`.
+
 **Verification:**
 
 ```bash
@@ -749,6 +754,11 @@ verschluckt.
 Scanline-Enthüllung des „AI WORKBENCH"-Logos. Beliebige Taste oder Klick
 überspringt sie; `false` deaktiviert sie komplett (z. B. auf langsamen oder
 Headless-Systemen).
+
+Während das Terminal geprüft wird und die Panes starten, erscheint sofort ein
+statischer Boot-Screen (Wortmarke, Version und eine Statuszeile wie
+„probing terminal...") — es gibt keinen schwarzen Bildschirm mehr vor dem
+Intro. Der Boot-Screen wird immer angezeigt, unabhängig von `intro_animation`.
 
 **Verifikation:**
 

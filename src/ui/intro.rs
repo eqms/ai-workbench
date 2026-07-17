@@ -72,6 +72,14 @@ impl IntroState {
         self.visible = false;
     }
 
+    /// Re-anchor the animation clock to now. Called at the top of `App::run`
+    /// so the full duration plays from the first visible frame — without
+    /// this, time spent in `App::new` (constructed before the first draw)
+    /// silently eats into the animation budget.
+    pub fn restart(&mut self) {
+        self.start_time = Instant::now();
+    }
+
     /// Auto-dismiss once the total duration has elapsed. Called each loop
     /// iteration; cheap and non-blocking.
     pub fn tick(&mut self) {
@@ -131,7 +139,8 @@ fn glyph(c: char) -> [&'static str; 5] {
 }
 
 /// Assemble the block banner for [`LOGO_TEXT`] as 5 equal-width rows.
-fn build_banner() -> Vec<String> {
+/// `pub(crate)` so the boot screen renders the identical wordmark.
+pub(crate) fn build_banner() -> Vec<String> {
     let mut rows = vec![String::new(); 5];
     for (i, c) in LOGO_TEXT.chars().enumerate() {
         if c == ' ' {
@@ -180,7 +189,8 @@ fn glitch_row(original: &str, rng: &mut u64) -> String {
 }
 
 /// Center a short string inside `width` columns with leading spaces.
-fn center_pad(text: &str, width: usize) -> String {
+/// `pub(crate)` so the boot screen shares the same centering.
+pub(crate) fn center_pad(text: &str, width: usize) -> String {
     let len = text.chars().count();
     if len >= width {
         return text.to_string();

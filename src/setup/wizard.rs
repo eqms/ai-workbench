@@ -107,8 +107,16 @@ pub struct WizardState {
 
 impl Default for WizardState {
     fn default() -> Self {
-        let deps = DependencyReport::check();
+        // Cheap placeholder construction — no subprocess spawns. The App
+        // struct always holds a WizardState, but the real dependency check
+        // only runs when the wizard is actually opened (first run).
+        Self::from_deps(DependencyReport::default())
+    }
+}
 
+impl WizardState {
+    /// Build the wizard state from an already-computed dependency report.
+    fn from_deps(deps: DependencyReport) -> Self {
         let available_shells: Vec<String> = deps
             .shells
             .iter()
@@ -174,16 +182,16 @@ impl Default for WizardState {
             ssh_image_paste_marked_configured: false,
         }
     }
-}
 
-impl WizardState {
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Open the wizard, pre-selecting `backend` as the default AI backend.
+    /// Runs the (synchronous) dependency check — the wizard's Dependencies
+    /// step needs real detection results before the first render.
     pub fn open(&mut self, backend: AiBackend) {
-        *self = Self::default();
+        *self = Self::from_deps(DependencyReport::check());
         self.selected_backend = backend;
         self.visible = true;
     }

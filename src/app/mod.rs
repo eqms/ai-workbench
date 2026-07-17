@@ -1,5 +1,6 @@
 mod clipboard;
 mod daily_claude;
+mod dependency_check;
 mod drawing;
 mod file_ops;
 mod git_ops;
@@ -172,6 +173,9 @@ pub struct App {
     pub ssh_image_paste_hint: Option<(String, std::time::Instant)>,
     /// Cached dependency report for F12 help and clipboard status display.
     pub dependency_report: crate::setup::DependencyReport,
+    /// Async job: startup dependency check (~12-20 subprocess spawns) — runs
+    /// on a background thread so it never delays the first frame.
+    pub dependency_check_job: JobState<crate::setup::DependencyReport>,
     // Temp files created for browser previews (auto-deleted on drop via NamedTempFile)
     pub temp_preview_files: Vec<tempfile::NamedTempFile>,
     // Export format chooser (Ctrl+X on Markdown files or directories)
@@ -370,31 +374,24 @@ impl App {
             clipboard_warning_dismissed: false,
             ssh_image_paste_hint: None,
             dependency_report: crate::setup::DependencyReport::default(),
+            dependency_check_job: JobState::default(),
             temp_preview_files: Vec::new(),
             export_chooser: crate::types::ExportChooserState::default(),
             export_job: JobState::default(),
             export_browser: None,
         };
 
-        // Run dependency check and seed the clipboard warning banner if no
-        // Linux helpers are available (xclip / xsel / wl-copy / wl-paste).
-        // On macOS / Windows / native Linux with arboard the helpers are
-        // optional, so we only nag on Linux without any helper present.
-        app.dependency_report = crate::setup::DependencyReport::check();
-        #[cfg(target_os = "linux")]
-        {
-            let helpers = &app.dependency_report.clipboard_helpers;
-            if helpers.none_available() {
-                app.clipboard_warning = Some((
-                    "xclip / xsel / wl-copy fehlen — Clipboard eingeschränkt. F12 für Details, Esc zum Schließen.".to_string(),
-                    std::time::Instant::now(),
-                ));
-            }
-        }
-
-        // Open wizard on first run
+        // Dependency check: the ~12-20 sequential subprocess spawns were the
+        // dominant cost of the startup black screen, so the check runs on a
+        // background thread (poll_dependency_check in the event loop). Only
+        // the first-run wizard needs the result synchronously — there the
+        // wizard's own check is reused instead of starting a duplicate job.
         if should_open_wizard {
             app.wizard.open(app.backend);
+            app.dependency_report = app.wizard.deps.clone();
+            app.seed_clipboard_warning();
+        } else {
+            app.start_dependency_check();
         }
 
         app.update_preview();
@@ -455,6 +452,11 @@ impl App {
     }
 
     pub fn run(mut self, mut terminal: DefaultTerminal) -> Result<bool> {
+        // Re-anchor the intro clock: IntroState was constructed partway
+        // through App::new, so without this the animation budget starts
+        // draining before the first frame is ever visible.
+        self.intro.restart();
+
         while !self.should_quit {
             // Check for exited PTYs and restart them with a shell
             self.check_and_restart_exited_ptys();
@@ -473,6 +475,9 @@ impl App {
 
             // Poll for async git remote check results
             self.poll_git_check();
+
+            // Poll for async startup dependency check
+            self.poll_dependency_check();
 
             // Poll for async PDF export result
             self.poll_export_result();

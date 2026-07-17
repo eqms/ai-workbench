@@ -1,5 +1,19 @@
 # Release Notes
 
+## Version 1.9.0 (17.07.2026)
+
+### Added
+
+- **[ADD] Immediate boot screen — no more black screen at startup.** Previously the terminal went black for 3–5 seconds between launch and the intro animation: `ratatui::init()` blanks the screen (alternate screen), and only afterwards ran the kitty-keyboard probe (up to ~2 s on unresponsive terminals) and `App::new()` synchronously before the first frame. The new `ui::boot_screen` module paints an instant frame right after terminal init — the "AI WORKBENCH" block wordmark in the intro's stabilized cyan style, version, and a status line ("probing terminal..." → "initializing panes...") — so startup shows immediate feedback and flows seamlessly into the intro animation. `App::new` duration is now logged to `update.log` for startup profiling.
+
+### Changed
+
+- **[CHG] Startup dependency check moved off the critical path.** `DependencyReport::check()` (~12–20 sequential subprocess spawns probing git/claude/opencode/pi/codex/lazygit and shells) ran synchronously — and, due to `WizardState`'s eager `Default`, effectively **twice** on every launch (three times on first run). It now runs once on a background thread via the existing `JobState` pattern (`check_async()`, polled in the event loop); `WizardState::default()` no longer spawns any subprocesses, and only the first-run wizard performs a synchronous check when it actually opens. The Linux clipboard-helper warning banner is seeded when the background check completes.
+
+### Fixed
+
+- **[FIX] Intro animation no longer starts before it is visible.** `IntroState`'s clock began mid-`App::new()`, so construction time silently consumed part of the ~4.5 s animation budget — the intro appeared to start partway through. `App::run` now re-anchors the clock (`IntroState::restart()`) right before the first frame, so the full glitch → sweep → stabilize sequence plays from the moment it becomes visible.
+
 ## Version 1.8.0 (16.07.2026)
 
 ### Added

@@ -658,7 +658,7 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
         let _ = writeln!(err, "  spawning {} pane...", backend.short_label());
     }
 
-    let terminal = ratatui::init();
+    let mut terminal = ratatui::init();
     // ratatui::init() enables raw mode through ratatui-crossterm's own
     // crossterm 0.29, so the direct crossterm 0.28 dependency (which runs the
     // event loop and its input parser) still believes the terminal is cooked.
@@ -672,6 +672,18 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
         crossterm::event::EnableMouseCapture,
         crossterm::event::EnableBracketedPaste
     )?;
+
+    // Boot screen: the alternate screen is already active (blank), but the
+    // kitty probe below and App::new can take seconds. Paint an immediate
+    // frame so the user never stares at a black screen.
+    terminal.draw(|f| {
+        ui::boot_screen::render(
+            f,
+            f.area(),
+            "probing terminal...",
+            env!("CARGO_PKG_VERSION"),
+        )
+    })?;
 
     // Kitty keyboard protocol: makes Shift+Enter distinguishable from plain
     // Enter (needed for newline insertion in the AI pane). The probe requires
@@ -691,7 +703,18 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
         );
     }
 
+    terminal.draw(|f| {
+        ui::boot_screen::render(
+            f,
+            f.area(),
+            "initializing panes...",
+            env!("CARGO_PKG_VERSION"),
+        )
+    })?;
+
+    let t_new = std::time::Instant::now();
     let app = App::new(config, session, fake_version, backend);
+    update::log_update(&format!("App::new took {} ms", t_new.elapsed().as_millis()));
 
     let restart_requested = app.run(terminal);
 

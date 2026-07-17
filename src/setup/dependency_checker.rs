@@ -79,6 +79,17 @@ impl DependencyReport {
         }
     }
 
+    /// Run `check()` on a background thread. The receiver delivers the report
+    /// once; poll it via `JobState` from the event loop so the ~12-20
+    /// sequential subprocess spawns never block startup rendering.
+    pub fn check_async() -> std::sync::mpsc::Receiver<Self> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(Self::check());
+        });
+        rx
+    }
+
     /// The CLI status for a given AI backend.
     pub fn backend_cli(&self, backend: crate::backend::AiBackend) -> &DependencyStatus {
         use crate::backend::AiBackend;
@@ -293,6 +304,17 @@ mod tests {
             "Shells found: {:?}",
             report.shells.iter().map(|s| &s.name).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn test_check_async_delivers_report() {
+        let rx = DependencyReport::check_async();
+        let report = rx
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("background check should deliver a report");
+        // Same expectation as test_check_command_finds_git_directly: git is
+        // required and present in every dev environment running the tests.
+        assert!(report.git.found, "git should be found by async check");
     }
 
     #[test]
