@@ -1,5 +1,11 @@
 # Release Notes
 
+## Version 1.9.1 (17.07.2026)
+
+### Changed
+
+- **[CHG] CI hardening: `timeout-minutes` on all workflow jobs** (CI-only, no release tag — takes effect from the next `v*` tag). The v1.9.0 release run lost 45 minutes to a hung `rustup` install on the `aarch64-pc-windows-msvc` runner before GitHub reaped the job (no logs uploaded, Create Release + Homebrew jobs skipped). Build jobs in `release.yml` now time out after 25 minutes (~2× the longest observed build, 14 min), Create Release and Update Homebrew Formula after 10; `ci.yml` check/test/clippy get 25, fmt 10. A stuck runner now fails fast and can be retried immediately via `gh run rerun --failed`.
+
 ## Version 1.9.0 (17.07.2026)
 
 ### Added

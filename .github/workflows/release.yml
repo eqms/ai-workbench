@@ -21,6 +21,10 @@ jobs:
   build:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    # Longest observed build: ~14 min (x86_64-windows, v1.8.0). A hung runner
+    # (e.g. rustup install stall on windows-latest, seen in the v1.9.0 run)
+    # otherwise blocks the release for 45+ min before GitHub reaps the job.
+    timeout-minutes: 25
     if: github.event_name == 'push'
     strategy:
       fail-fast: false
@@ -131,6 +135,7 @@ jobs:
     needs: build
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -305,6 +310,7 @@ jobs:
   update-homebrew-tap:
     name: Update Homebrew Formula
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: [release]
     if: always() && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch')
     steps:
