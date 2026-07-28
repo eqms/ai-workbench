@@ -1,5 +1,18 @@
 # Release Notes
 
+## Version 1.9.4 (28.07.2026)
+
+### Added
+
+- **[ADD] Two new AI backends: `ollama-opencode` and `ollama-pi`.** You can now launch OpenCode and Pi through Ollama directly from the workbench. Both appear as separate entries in the F8 backend menu ("OllamaOC" / "OllamaPi") and have their own dedicated Settings fields under Shift+F8 → Paths: "Ollama OpenCode Command" and "Ollama Pi Command". Defaults are `ollama launch opencode` and `ollama launch pi`; add `--model ...` in Settings or `config.yaml` to target a specific model, e.g.:
+  ```yaml
+  pty:
+    ollama_opencode_command: ["ollama", "launch", "opencode", "--model", "kimi-k2.7-code:cloud"]
+    ollama_pi_command: ["ollama", "launch", "pi", "--model", "qwen3.5:cloud"]
+  ```
+- The CLI accepts `ai-workbench ollama-opencode` and `ai-workbench ollama-pi`; session persistence stores them as `ollama-opencode` / `ollama-pi`.
+- The setup wizard now detects `ollama`, lets you configure the Ollama path, and picks the new backends with keys `5` and `6`.
+
 ## Version 1.9.3 (28.07.2026)
 
 ### Added

@@ -2,8 +2,9 @@
 //!
 //! AI Workbench drives one of several AI coding-agent CLIs in its primary
 //! (AI) pane. The concrete backend is chosen via a positional CLI argument
-//! (`ai-workbench claude|opencode|pi|codex`) and persisted across runs. Every
-//! other pane (file browser, preview, LazyGit, terminal) is backend-agnostic.
+//! (`ai-workbench claude|opencode|pi|codex|ollama-opencode|ollama-pi`) and
+//! persisted across runs. Every other pane (file browser, preview, LazyGit,
+//! terminal) is backend-agnostic.
 
 use serde::{Deserialize, Serialize};
 
@@ -20,43 +21,63 @@ pub enum AiBackend {
     Pi,
     /// OpenAI Codex CLI (`codex`).
     Codex,
+    /// OpenCode launched via Ollama (`ollama launch opencode ...`).
+    #[serde(rename = "ollama-opencode")]
+    OllamaOpenCode,
+    /// Pi launched via Ollama (`ollama launch pi ...`).
+    #[serde(rename = "ollama-pi")]
+    OllamaPi,
 }
 
 impl AiBackend {
     /// Parse a user-supplied backend name, case-insensitively.
-    /// Accepts e.g. "claude", "Claude", "opencode", "OpenCode", "pi", "codex".
+    /// Accepts e.g. "claude", "opencode", "ollama-opencode", "ollama-pi", ...
     pub fn parse(s: &str) -> Option<Self> {
         match s.trim().to_ascii_lowercase().as_str() {
             "claude" => Some(Self::Claude),
             "opencode" => Some(Self::OpenCode),
             "pi" => Some(Self::Pi),
             "codex" => Some(Self::Codex),
+            "ollama-opencode" => Some(Self::OllamaOpenCode),
+            "ollama-pi" => Some(Self::OllamaPi),
             _ => None,
         }
     }
 
     /// All backends, in display order.
-    pub fn all() -> [Self; 4] {
-        [Self::Claude, Self::OpenCode, Self::Pi, Self::Codex]
+    pub fn all() -> [Self; 6] {
+        [
+            Self::Claude,
+            Self::OpenCode,
+            Self::Pi,
+            Self::Codex,
+            Self::OllamaOpenCode,
+            Self::OllamaPi,
+        ]
     }
 
-    /// The next backend in the cycle (wraps Codex → Claude). Drives the F8 switch.
+    /// The next backend in the cycle (wraps OllamaPi → Claude). Drives the F8 switch.
     pub fn next(self) -> Self {
         match self {
             Self::Claude => Self::OpenCode,
             Self::OpenCode => Self::Pi,
             Self::Pi => Self::Codex,
-            Self::Codex => Self::Claude,
+            Self::Codex => Self::OllamaOpenCode,
+            Self::OllamaOpenCode => Self::OllamaPi,
+            Self::OllamaPi => Self::Claude,
         }
     }
 
     /// The default executable name looked up on `$PATH`.
+    /// For Ollama variants this is the wrapper binary name used as a fallback.
     pub fn binary_name(&self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::OpenCode => "opencode",
             Self::Pi => "pi",
             Self::Codex => "codex",
+            Self::OllamaOpenCode => "ollama",
+            Self::OllamaPi => "ollama",
         }
     }
 
@@ -67,6 +88,8 @@ impl AiBackend {
             Self::OpenCode => "opencode",
             Self::Pi => "pi",
             Self::Codex => "codex",
+            Self::OllamaOpenCode => "ollama-opencode",
+            Self::OllamaPi => "ollama-pi",
         }
     }
 
@@ -77,6 +100,8 @@ impl AiBackend {
             Self::OpenCode => " OpenCode ",
             Self::Pi => " Pi ",
             Self::Codex => " Codex ",
+            Self::OllamaOpenCode => " Ollama OpenCode ",
+            Self::OllamaPi => " Ollama Pi ",
         }
     }
 
@@ -87,6 +112,8 @@ impl AiBackend {
             Self::OpenCode => "OpenCode",
             Self::Pi => "Pi",
             Self::Codex => "Codex",
+            Self::OllamaOpenCode => "OllamaOC",
+            Self::OllamaPi => "OllamaPi",
         }
     }
 
@@ -97,6 +124,11 @@ impl AiBackend {
     /// configure via `pty.codex_command` instead of a startup dialog.
     pub fn supports_claude_flags(&self) -> bool {
         matches!(self, Self::Claude)
+    }
+
+    /// Whether this backend uses a custom Ollama-wrapped command.
+    pub fn is_ollama(&self) -> bool {
+        matches!(self, Self::OllamaOpenCode | Self::OllamaPi)
     }
 }
 
@@ -114,6 +146,11 @@ mod tests {
         assert_eq!(AiBackend::parse("  pi  "), Some(AiBackend::Pi));
         assert_eq!(AiBackend::parse("Codex"), Some(AiBackend::Codex));
         assert_eq!(AiBackend::parse("  codex  "), Some(AiBackend::Codex));
+        assert_eq!(
+            AiBackend::parse("ollama-opencode"),
+            Some(AiBackend::OllamaOpenCode)
+        );
+        assert_eq!(AiBackend::parse("OLLAMA-Pi"), Some(AiBackend::OllamaPi));
         assert_eq!(AiBackend::parse("gpt"), None);
     }
 
@@ -127,7 +164,9 @@ mod tests {
         assert_eq!(AiBackend::Claude.next(), AiBackend::OpenCode);
         assert_eq!(AiBackend::OpenCode.next(), AiBackend::Pi);
         assert_eq!(AiBackend::Pi.next(), AiBackend::Codex);
-        assert_eq!(AiBackend::Codex.next(), AiBackend::Claude);
+        assert_eq!(AiBackend::Codex.next(), AiBackend::OllamaOpenCode);
+        assert_eq!(AiBackend::OllamaOpenCode.next(), AiBackend::OllamaPi);
+        assert_eq!(AiBackend::OllamaPi.next(), AiBackend::Claude);
     }
 
     #[test]
@@ -136,5 +175,14 @@ mod tests {
         assert!(!AiBackend::OpenCode.supports_claude_flags());
         assert!(!AiBackend::Pi.supports_claude_flags());
         assert!(!AiBackend::Codex.supports_claude_flags());
+        assert!(!AiBackend::OllamaOpenCode.supports_claude_flags());
+        assert!(!AiBackend::OllamaPi.supports_claude_flags());
+    }
+
+    #[test]
+    fn ollama_variants_are_detected() {
+        assert!(AiBackend::OllamaOpenCode.is_ollama());
+        assert!(AiBackend::OllamaPi.is_ollama());
+        assert!(!AiBackend::OpenCode.is_ollama());
     }
 }

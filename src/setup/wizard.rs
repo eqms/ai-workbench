@@ -65,6 +65,8 @@ pub enum WizardField {
     OpenCodePath,
     PiPath,
     CodexPath,
+    OllamaOpenCodePath,
+    OllamaPiPath,
     LazygitPath,
     ShellPath,
 }
@@ -82,6 +84,8 @@ pub struct WizardState {
     pub opencode_path: String,
     pub pi_path: String,
     pub codex_path: String,
+    pub ollama_opencode_path: String,
+    pub ollama_pi_path: String,
     pub lazygit_path: String,
     /// The AI backend chosen as the default for argument-less launches.
     pub selected_backend: AiBackend,
@@ -163,6 +167,18 @@ impl WizardState {
                 .as_ref()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|| "codex".to_string()),
+            ollama_opencode_path: deps
+                .ollama_cli
+                .path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "ollama".to_string()),
+            ollama_pi_path: deps
+                .ollama_cli
+                .path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "ollama".to_string()),
             selected_backend: AiBackend::default(),
             lazygit_path: deps
                 .lazygit
@@ -270,6 +286,8 @@ impl WizardState {
             WizardField::OpenCodePath => self.opencode_path.clone(),
             WizardField::PiPath => self.pi_path.clone(),
             WizardField::CodexPath => self.codex_path.clone(),
+            WizardField::OllamaOpenCodePath => self.ollama_opencode_path.clone(),
+            WizardField::OllamaPiPath => self.ollama_pi_path.clone(),
             WizardField::LazygitPath => self.lazygit_path.clone(),
             WizardField::ShellPath => self
                 .available_shells
@@ -287,6 +305,8 @@ impl WizardState {
                 WizardField::OpenCodePath => self.opencode_path = value,
                 WizardField::PiPath => self.pi_path = value,
                 WizardField::CodexPath => self.codex_path = value,
+                WizardField::OllamaOpenCodePath => self.ollama_opencode_path = value,
+                WizardField::OllamaPiPath => self.ollama_pi_path = value,
                 WizardField::LazygitPath => self.lazygit_path = value,
                 WizardField::ShellPath => {
                     // Add custom shell to list if not present
@@ -327,6 +347,16 @@ impl WizardState {
         config.pty.opencode_command = vec![self.opencode_path.clone()];
         config.pty.pi_command = vec![self.pi_path.clone()];
         config.pty.codex_command = vec![self.codex_path.clone()];
+        config.pty.ollama_opencode_command = vec![
+            self.ollama_opencode_path.clone(),
+            "launch".to_string(),
+            "opencode".to_string(),
+        ];
+        config.pty.ollama_pi_command = vec![
+            self.ollama_pi_path.clone(),
+            "launch".to_string(),
+            "pi".to_string(),
+        ];
         config.pty.lazygit_command = vec![self.lazygit_path.clone()];
 
         // SSH-image-paste: persist detected helper path and dismissed flag

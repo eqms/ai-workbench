@@ -635,4 +635,44 @@ mod tests {
         assert!(!cmd.iter().any(|a| a == "--model"));
         assert!(!cmd.iter().any(|a| a == "--effort"));
     }
+
+    #[test]
+    fn test_ollama_opencode_backend_uses_configured_command() {
+        let mut cfg = Config::default();
+        cfg.pty.ollama_opencode_command = vec![
+            "ollama".to_string(),
+            "launch".to_string(),
+            "opencode".to_string(),
+            "--model".to_string(),
+            "kimi-k2.7-code:cloud".to_string(),
+        ];
+        let opts = base_opts();
+        let cmd = App::build_ai_command(&cfg, AiBackend::OllamaOpenCode, &opts);
+        assert_eq!(cmd[0], "ollama");
+        assert!(cmd.contains(&"launch".to_string()));
+        assert!(cmd.contains(&"opencode".to_string()));
+        assert!(cmd.contains(&"--model".to_string()));
+        assert!(cmd.contains(&"kimi-k2.7-code:cloud".to_string()));
+        assert!(!cmd.iter().any(|a| a == "--permission-mode"));
+    }
+
+    #[test]
+    fn test_ollama_pi_backend_uses_configured_command() {
+        let mut cfg = Config::default();
+        cfg.pty.ollama_pi_command = vec![
+            "ollama".to_string(),
+            "launch".to_string(),
+            "pi".to_string(),
+            "--model".to_string(),
+            "qwen3.5:cloud".to_string(),
+        ];
+        let opts = base_opts();
+        let cmd = App::build_ai_command(&cfg, AiBackend::OllamaPi, &opts);
+        assert_eq!(cmd[0], "ollama");
+        assert!(cmd.contains(&"launch".to_string()));
+        assert!(cmd.contains(&"pi".to_string()));
+        assert!(cmd.contains(&"--model".to_string()));
+        assert!(cmd.contains(&"qwen3.5:cloud".to_string()));
+        assert!(!cmd.iter().any(|a| a == "--permission-mode"));
+    }
 }

@@ -317,6 +317,8 @@ fn render_claude_config(frame: &mut Frame, area: Rect, state: &WizardState) {
         Constraint::Length(3), // OpenCode path
         Constraint::Length(3), // Pi path
         Constraint::Length(3), // Codex path
+        Constraint::Length(3), // Ollama OpenCode path
+        Constraint::Length(3), // Ollama Pi path
         Constraint::Length(3), // LazyGit path
         Constraint::Min(1),    // hint
     ])
@@ -350,14 +352,15 @@ fn render_claude_config(frame: &mut Frame, area: Rect, state: &WizardState) {
         Paragraph::new(vec![
             Line::from(selector_spans),
             Line::from(Span::styled(
-                "  press 1/2/3/4 to choose",
+                "  press 1-6 to choose",
                 Style::default().fg(Color::DarkGray),
             )),
         ]),
         chunks[1],
     );
 
-    // CLI path fields (focused_field: 0=Claude, 1=OpenCode, 2=Pi, 3=Codex, 4=LazyGit)
+    // CLI path fields (focused_field: 0=Claude, 1=OpenCode, 2=Pi, 3=Codex,
+    // 4=Ollama OpenCode, 5=Ollama Pi, 6=LazyGit)
     render_path_field(
         frame,
         chunks[2],
@@ -401,19 +404,39 @@ fn render_claude_config(frame: &mut Frame, area: Rect, state: &WizardState) {
     render_path_field(
         frame,
         chunks[6],
+        "Ollama OpenCode",
+        &state.ollama_opencode_path,
+        state.deps.ollama_cli.found,
+        state.focused_field == 4,
+        state.editing_field == Some(WizardField::OllamaOpenCodePath),
+        &state.input_buffer,
+    );
+    render_path_field(
+        frame,
+        chunks[7],
+        "Ollama Pi",
+        &state.ollama_pi_path,
+        state.deps.ollama_cli.found,
+        state.focused_field == 5,
+        state.editing_field == Some(WizardField::OllamaPiPath),
+        &state.input_buffer,
+    );
+    render_path_field(
+        frame,
+        chunks[8],
         "LazyGit",
         &state.lazygit_path,
         state.deps.lazygit.found,
-        state.focused_field == 4,
+        state.focused_field == 6,
         state.editing_field == Some(WizardField::LazygitPath),
         &state.input_buffer,
     );
 
     let hint = Paragraph::new(Span::styled(
-        "↑/↓ select field · e edit · 1/2/3/4 default backend · →/Tab next",
+        "↑/↓ select field · e edit · 1-6 default backend · →/Tab next",
         Style::default().fg(Color::DarkGray),
     ));
-    frame.render_widget(hint, chunks[7]);
+    frame.render_widget(hint, chunks[9]);
 }
 
 /// Render a single "<label> Path: <status>" + editable value block.

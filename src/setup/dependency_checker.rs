@@ -48,6 +48,7 @@ pub struct DependencyReport {
     pub opencode_cli: DependencyStatus,
     pub pi_cli: DependencyStatus,
     pub codex_cli: DependencyStatus,
+    pub ollama_cli: DependencyStatus,
     pub lazygit: DependencyStatus,
     pub shells: Vec<DependencyStatus>,
     pub clipboard_helpers: ClipboardHelpers,
@@ -62,6 +63,7 @@ impl DependencyReport {
             opencode_cli: check_command("opencode", &["--version"], false),
             pi_cli: check_command("pi", &["--version"], false),
             codex_cli: check_command("codex", &["--version"], false),
+            ollama_cli: check_command("ollama", &["--version"], false),
             lazygit: check_command("lazygit", &["--version"], false),
             shells: check_available_shells(),
             clipboard_helpers: ClipboardHelpers {
@@ -98,7 +100,13 @@ impl DependencyReport {
             AiBackend::OpenCode => &self.opencode_cli,
             AiBackend::Pi => &self.pi_cli,
             AiBackend::Codex => &self.codex_cli,
+            AiBackend::OllamaOpenCode | AiBackend::OllamaPi => &self.ollama_cli,
         }
+    }
+
+    /// True if the Ollama wrapper binary is available.
+    pub fn ollama_available(&self) -> bool {
+        self.ollama_cli.found
     }
 
     /// Returns true if all required dependencies are met

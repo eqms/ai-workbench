@@ -1,10 +1,10 @@
 //! AI backend selection menu (F8).
 //!
 //! Opened with F8, this modal lets the user pick which AI backend
-//! (Claude / OpenCode / Pi) drives the primary pane. Unlike the old
-//! cycle-on-keypress behaviour, the target is shown and confirmed
-//! explicitly: F8 / ↑↓ / j k move the highlight, Enter applies the
-//! selection (respawning the AI pane), Esc cancels without a switch.
+//! (Claude / OpenCode / Pi / Codex / Ollama OpenCode / Ollama Pi) drives the
+//! primary pane. Unlike the old cycle-on-keypress behaviour, the target is
+//! shown and confirmed explicitly: F8 / ↑↓ / j k move the highlight, Enter
+//! applies the selection (respawning the AI pane), Esc cancels without a switch.
 //!
 //! State follows the same `visible + selected: usize` pattern as
 //! [`crate::ui::permission_mode::PermissionModeState`].
@@ -70,6 +70,8 @@ fn backend_description(backend: AiBackend) -> &'static str {
         AiBackend::OpenCode => "OpenCode CLI",
         AiBackend::Pi => "Pi CLI (by Inflection)",
         AiBackend::Codex => "OpenAI Codex CLI",
+        AiBackend::OllamaOpenCode => "OpenCode via Ollama launch",
+        AiBackend::OllamaPi => "Pi via Ollama launch",
     }
 }
 
@@ -203,6 +205,10 @@ mod tests {
         state.next();
         assert_eq!(state.selected_backend(), AiBackend::Codex);
         state.next();
+        assert_eq!(state.selected_backend(), AiBackend::OllamaOpenCode);
+        state.next();
+        assert_eq!(state.selected_backend(), AiBackend::OllamaPi);
+        state.next();
         assert_eq!(state.selected_backend(), AiBackend::Claude);
     }
 
@@ -211,9 +217,9 @@ mod tests {
         let mut state = BackendSwitchState::default();
         state.open(AiBackend::Claude);
         state.prev();
-        assert_eq!(state.selected_backend(), AiBackend::Codex);
+        assert_eq!(state.selected_backend(), AiBackend::OllamaPi);
         state.prev();
-        assert_eq!(state.selected_backend(), AiBackend::Pi);
+        assert_eq!(state.selected_backend(), AiBackend::OllamaOpenCode);
     }
 
     #[test]
