@@ -169,6 +169,16 @@ pub fn open_file_with_editor(path: &Path, editor: &str) -> Result<()> {
     Ok(())
 }
 
+/// Check if file is a markdown file
+pub fn is_markdown(path: &Path) -> bool {
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase());
+
+    matches!(ext.as_deref(), Some("md" | "markdown" | "mdown" | "mkd"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -208,14 +218,4 @@ mod tests {
         assert!(validate_program("a&b").is_err(), "ampersand");
         assert!(validate_program("a`b`").is_err(), "backtick");
     }
-}
-
-/// Check if file is a markdown file
-pub fn is_markdown(path: &Path) -> bool {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase());
-
-    matches!(ext.as_deref(), Some("md" | "markdown" | "mdown" | "mkd"))
 }

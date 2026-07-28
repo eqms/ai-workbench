@@ -892,8 +892,10 @@ mod tests {
 
     #[test]
     fn prefix_key_disabled_values_return_none() {
-        let mut c = PtyConfig::default();
-        c.terminal_prefix = String::new();
+        let mut c = PtyConfig {
+            terminal_prefix: String::new(),
+            ..Default::default()
+        };
         assert_eq!(c.prefix_key(), None);
         c.terminal_prefix = "none".to_string();
         assert_eq!(c.prefix_key(), None);
@@ -901,8 +903,10 @@ mod tests {
 
     #[test]
     fn prefix_key_is_case_insensitive_and_accepts_c_dash() {
-        let mut c = PtyConfig::default();
-        c.terminal_prefix = "Ctrl+A".to_string();
+        let mut c = PtyConfig {
+            terminal_prefix: "Ctrl+A".to_string(),
+            ..Default::default()
+        };
         assert_eq!(c.prefix_key(), Some('a'));
         c.terminal_prefix = "c-x".to_string();
         assert_eq!(c.prefix_key(), Some('x'));
@@ -910,8 +914,10 @@ mod tests {
 
     #[test]
     fn prefix_key_rejects_malformed() {
-        let mut c = PtyConfig::default();
-        c.terminal_prefix = "ctrl+ab".to_string();
+        let mut c = PtyConfig {
+            terminal_prefix: "ctrl+ab".to_string(),
+            ..Default::default()
+        };
         assert_eq!(c.prefix_key(), None);
         c.terminal_prefix = "ctrl+1".to_string();
         assert_eq!(c.prefix_key(), None);

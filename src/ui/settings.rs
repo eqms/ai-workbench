@@ -1634,11 +1634,13 @@ mod tests {
 
     #[test]
     fn test_dropdown_confirm_sets_browser() {
-        let mut state = SettingsState::default();
-        state.detected_browsers = vec![DetectedApp {
-            display_name: "Firefox".to_string(),
-            command: "open -a Firefox".to_string(),
-        }];
+        let mut state = SettingsState {
+            detected_browsers: vec![DetectedApp {
+                display_name: "Firefox".to_string(),
+                command: "open -a Firefox".to_string(),
+            }],
+            ..Default::default()
+        };
 
         state.open_browser_dropdown();
         assert!(state.dropdown.is_some());
@@ -1654,8 +1656,10 @@ mod tests {
 
     #[test]
     fn test_dropdown_custom_returns_true() {
-        let mut state = SettingsState::default();
-        state.detected_browsers = vec![];
+        let mut state = SettingsState {
+            detected_browsers: vec![],
+            ..Default::default()
+        };
 
         state.open_browser_dropdown();
         // Select "Custom path..." (last item, index 1 since no browsers detected)

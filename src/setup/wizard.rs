@@ -382,9 +382,11 @@ mod tests {
 
     #[test]
     fn test_generate_config() {
-        let mut state = WizardState::default();
-        state.claude_path = "/usr/local/bin/claude".to_string();
-        state.codex_path = "/usr/local/bin/codex".to_string();
+        let state = WizardState {
+            claude_path: "/usr/local/bin/claude".to_string(),
+            codex_path: "/usr/local/bin/codex".to_string(),
+            ..Default::default()
+        };
         let config = state.generate_config();
         assert!(config.setup.wizard_completed);
         assert_eq!(config.pty.claude_command, vec!["/usr/local/bin/claude"]);
@@ -405,8 +407,10 @@ mod tests {
 
     #[test]
     fn test_mark_as_configured_persisted_to_config() {
-        let mut state = WizardState::default();
-        state.ssh_image_paste_marked_configured = true;
+        let state = WizardState {
+            ssh_image_paste_marked_configured: true,
+            ..Default::default()
+        };
         let config = state.generate_config();
         assert!(config.ssh.notification_dismissed);
     }

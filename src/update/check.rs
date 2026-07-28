@@ -126,12 +126,25 @@ pub fn check_for_update_async_with_version(
     rx
 }
 
+/// Get the target triple for the current platform
+pub(super) fn get_target() -> &'static str {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => "aarch64-apple-darwin",
+        ("macos", "x86_64") => "x86_64-apple-darwin",
+        ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
+        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+        ("windows", "x86_64") => "x86_64-pc-windows-msvc",
+        ("windows", "aarch64") => "aarch64-pc-windows-msvc",
+        _ => "unknown",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
     fn test_max_semver_selection_ignores_creation_order() {
         use semver::Version;
-        let tags = vec!["v0.85.1", "v0.89.0", "v0.88.3", "v0.85.2"];
+        let tags = ["v0.85.1", "v0.89.0", "v0.88.3", "v0.85.2"];
         let best = tags
             .iter()
             .filter_map(|t| {
@@ -150,7 +163,7 @@ mod tests {
     #[test]
     fn test_max_semver_skips_unparseable_tags() {
         use semver::Version;
-        let tags = vec!["nightly-abc", "v0.89.0", "v0.88.0"];
+        let tags = ["nightly-abc", "v0.89.0", "v0.88.0"];
         let best = tags
             .iter()
             .filter_map(|t| {
@@ -164,18 +177,5 @@ mod tests {
             Some("v0.89.0"),
             "unparseable nightly tag must be skipped"
         );
-    }
-}
-
-/// Get the target triple for the current platform
-pub(super) fn get_target() -> &'static str {
-    match (std::env::consts::OS, std::env::consts::ARCH) {
-        ("macos", "aarch64") => "aarch64-apple-darwin",
-        ("macos", "x86_64") => "x86_64-apple-darwin",
-        ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
-        ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
-        ("windows", "x86_64") => "x86_64-pc-windows-msvc",
-        ("windows", "aarch64") => "aarch64-pc-windows-msvc",
-        _ => "unknown",
     }
 }

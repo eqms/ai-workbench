@@ -1,5 +1,11 @@
 # Release Notes
 
+## Version 1.9.2 (28.07.2026)
+
+### Changed
+
+- **[CHG] Resolve all outstanding `cargo clippy -- -D warnings` failures.** The project no longer builds with the strict clippy profile due to 11 lint errors in test modules and initialization patterns: `items_after_test_module` (`src/browser/opener.rs`, `src/update/check.rs`), `field_reassign_with_default` in five test helpers (`src/config.rs`, `src/setup/wizard.rs`, `src/ui/settings.rs`), and `useless_vec` in semver-selection tests (`src/update/check.rs`). All affected code now uses struct-literal initialization with `..Default::default()`, places test modules at the end of their files, and replaces single-use `vec!` literals with arrays. No runtime behavior changed; this is a maintenance/CI-hardening release.
+
 ## Version 1.9.1 (17.07.2026)
 
 ### Changed
