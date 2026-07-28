@@ -1,5 +1,13 @@
 # Release Notes
 
+## Version 1.9.3 (28.07.2026)
+
+### Added
+
+- **[ADD] Settings text fields now support a real cursor, arrow navigation, and Command/Ctrl+V paste.** Previously the Settings dialog (Shift+F8) used a plain append-only input buffer: Backspace always removed the last character, there was no cursor position, and paste only worked with `Ctrl+V`. The editor now tracks a char-based cursor, renders the character at the cursor with a reversed-video block (or a trailing block cursor when at the end), and supports `←`/`→`, `Home`, `End`, `Delete`, `Backspace`, plus `Ctrl+V` and `Cmd+V` on macOS. This makes editing long command lines like `opencode --model kimi-k2.7-code:cloud` or `pi --model qwen3.5:cloud` in F8 → Settings → Paths much less frustrating.
+
+### Changed
+
 ## Version 1.9.2 (28.07.2026)
 
 ### Changed

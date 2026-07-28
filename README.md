@@ -90,7 +90,7 @@ ai-workbench codex      # OpenAI Codex CLI
 - **Self-update** - automatic update check from GitHub Releases
 - **App Dropdown** - auto-detect installed browsers/editors in Settings (macOS + Linux)
 - **Ctrl+X Markdown Export** - export as Markdown copy or PDF (native Typst engine, no external tools needed)
-- **Ctrl+V Paste** - clipboard paste in all input dialogs
+- **Settings text fields support cursor navigation** — `←/→`, `Home`/`End`, `Delete`, `Backspace`, and `Ctrl+V` / `Cmd+V` paste in Shift+F8 input fields
 - Mouse and keyboard navigation throughout
 
 ### Quick Start
@@ -281,7 +281,7 @@ ai-workbench codex      # OpenAI Codex CLI
 - **Selbst-Update** - automatische Update-Prüfung von GitHub Releases
 - **App-Dropdown** - automatische Erkennung installierter Browser/Editoren in Settings (macOS + Linux)
 - **Ctrl+X Markdown-Export** - Export als Markdown-Kopie oder PDF (native Typst-Engine, keine externen Tools nötig)
-- **Ctrl+V Einfügen** - Clipboard-Paste in allen Eingabedialogen
+- **Einstellungs-Textfelder mit Cursor-Navigation** — `←/→`, `Home`/`End`, `Delete`, `Backspace` und `Ctrl+V` / `Cmd+V` Einfügen in Shift+F8-Eingabefeldern
 - Maus- und Tastaturnavigation durchgehend
 
 ### Schnellstart

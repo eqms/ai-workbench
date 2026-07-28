@@ -910,22 +910,23 @@ impl App {
             match code {
                 KeyCode::Esc => self.settings.cancel_editing(),
                 KeyCode::Enter => self.settings.finish_editing(),
-                KeyCode::Backspace => {
-                    self.settings.input_buffer.pop();
-                }
+                KeyCode::Left => self.settings.cursor_left(),
+                KeyCode::Right => self.settings.cursor_right(),
+                KeyCode::Home => self.settings.cursor_home(),
+                KeyCode::End => self.settings.cursor_end(),
+                KeyCode::Backspace => self.settings.delete_before_cursor(),
+                KeyCode::Delete => self.settings.delete_at_cursor(),
                 KeyCode::Char(c) => {
-                    if modifiers.contains(KeyModifiers::CONTROL) {
-                        match c {
-                            'v' => {
-                                if let Some(text) = crate::clipboard::paste_from_clipboard() {
-                                    self.settings.input_buffer.push_str(&text);
-                                }
-                            }
-                            'c' => self.settings.cancel_editing(),
-                            _ => {}
+                    let is_paste = (modifiers.contains(KeyModifiers::CONTROL) && c == 'v')
+                        || (modifiers.contains(KeyModifiers::SUPER) && c == 'v');
+                    if is_paste {
+                        if let Some(text) = crate::clipboard::paste_from_clipboard() {
+                            self.settings.insert_str(&text);
                         }
-                    } else {
-                        self.settings.input_buffer.push(c);
+                    } else if modifiers.contains(KeyModifiers::CONTROL) && c == 'c' {
+                        self.settings.cancel_editing();
+                    } else if !modifiers.contains(KeyModifiers::CONTROL | KeyModifiers::SUPER) {
+                        self.settings.insert_char(c);
                     }
                 }
                 _ => {}

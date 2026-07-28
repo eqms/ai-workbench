@@ -197,6 +197,8 @@ pub struct SettingsState {
     pub selected_idx: usize,
     pub editing: Option<SettingsField>,
     pub input_buffer: String,
+    /// Cursor position inside `input_buffer` (char index, not byte index).
+    pub input_cursor: usize,
 
     // Cached config values (editable copies)
     pub shell_path: String,
@@ -266,6 +268,7 @@ impl Default for SettingsState {
             selected_idx: 0,
             editing: None,
             input_buffer: String::new(),
+            input_cursor: 0,
             shell_path: "/bin/bash".to_string(),
             scrollback_lines: 1000,
             show_hidden_files: true, // Show hidden files by default
@@ -460,6 +463,7 @@ impl SettingsState {
         self.editing = None;
         self.dropdown = None;
         self.input_buffer.clear();
+        self.input_cursor = 0;
     }
 
     pub fn next_category(&mut self) {
@@ -639,6 +643,7 @@ impl SettingsState {
                     unreachable!("SSH toggles handled inline above")
                 }
             };
+            self.input_cursor = self.input_buffer.chars().count();
             self.editing = Some(f);
         }
     }
@@ -650,6 +655,7 @@ impl SettingsState {
             SettingsField::ExternalEditor => self.external_editor.clone(),
             _ => String::new(),
         };
+        self.input_cursor = self.input_buffer.chars().count();
         self.editing = Some(field);
     }
 
@@ -861,12 +867,105 @@ impl SettingsState {
             }
             self.has_changes = true;
             self.input_buffer.clear();
+            self.input_cursor = 0;
         }
     }
 
     pub fn cancel_editing(&mut self) {
         self.editing = None;
         self.input_buffer.clear();
+        self.input_cursor = 0;
+    }
+
+    /// Move cursor one character left, clamping at the start.
+    pub fn cursor_left(&mut self) {
+        if self.input_cursor > 0 {
+            self.input_cursor -= 1;
+        }
+    }
+
+    /// Move cursor one character right, clamping at the end of `input_buffer`.
+    pub fn cursor_right(&mut self) {
+        let max = self.input_buffer.chars().count();
+        if self.input_cursor < max {
+            self.input_cursor += 1;
+        }
+    }
+
+    /// Move cursor to the start of `input_buffer`.
+    pub fn cursor_home(&mut self) {
+        self.input_cursor = 0;
+    }
+
+    /// Move cursor to the end of `input_buffer`.
+    pub fn cursor_end(&mut self) {
+        self.input_cursor = self.input_buffer.chars().count();
+    }
+
+    /// Insert a character at the current cursor position and advance cursor.
+    pub fn insert_char(&mut self, c: char) {
+        if self.input_cursor >= self.input_buffer.chars().count() {
+            self.input_buffer.push(c);
+        } else {
+            let pos = self
+                .input_buffer
+                .char_indices()
+                .nth(self.input_cursor)
+                .map(|(i, _)| i)
+                .unwrap_or(self.input_buffer.len());
+            self.input_buffer.insert(pos, c);
+        }
+        self.input_cursor += 1;
+    }
+
+    /// Delete the character before the cursor (Backspace).
+    pub fn delete_before_cursor(&mut self) {
+        if self.input_cursor > 0 {
+            self.input_cursor -= 1;
+            let pos = self
+                .input_buffer
+                .char_indices()
+                .nth(self.input_cursor)
+                .map(|(i, _)| i)
+                .unwrap_or(self.input_buffer.len());
+            let next = self.input_buffer[pos..].chars().next();
+            if let Some(c) = next {
+                let len = c.len_utf8();
+                self.input_buffer.replace_range(pos..pos + len, "");
+            }
+        }
+    }
+
+    /// Delete the character at the cursor (Delete key).
+    pub fn delete_at_cursor(&mut self) {
+        let pos = self
+            .input_buffer
+            .char_indices()
+            .nth(self.input_cursor)
+            .map(|(i, _)| i)
+            .unwrap_or(self.input_buffer.len());
+        if pos < self.input_buffer.len() {
+            let c = self.input_buffer[pos..].chars().next().unwrap_or('\0');
+            let len = c.len_utf8();
+            self.input_buffer.replace_range(pos..pos + len, "");
+        }
+    }
+
+    /// Insert a string at the current cursor position and advance cursor.
+    pub fn insert_str(&mut self, text: &str) {
+        if self.input_cursor >= self.input_buffer.chars().count() {
+            self.input_buffer.push_str(text);
+        } else {
+            let pos = self
+                .input_buffer
+                .char_indices()
+                .nth(self.input_cursor)
+                .map(|(i, _)| i)
+                .unwrap_or(self.input_buffer.len());
+            self.input_buffer.insert_str(pos, text);
+        }
+        // Only count actual Unicode characters for the cursor.
+        self.input_cursor += text.chars().count();
     }
 
     /// Get selected template (if any)
@@ -1038,6 +1137,7 @@ fn render_general(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 0,
             state.editing.as_ref() == Some(&SettingsField::ShellPath),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Scrollback Lines",
@@ -1045,6 +1145,7 @@ fn render_general(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 1,
             state.editing.as_ref() == Some(&SettingsField::ScrollbackLines),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_bool_setting(
             "Show Hidden Files",
@@ -1058,6 +1159,7 @@ fn render_general(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 4,
             state.editing.as_ref() == Some(&SettingsField::AutoRefreshMs),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_action_setting("Check for Updates", state.selected_idx == 5),
     ];
@@ -1074,6 +1176,7 @@ fn render_layout(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 0,
             state.editing.as_ref() == Some(&SettingsField::FileBrowserWidth),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Preview Width %",
@@ -1081,6 +1184,7 @@ fn render_layout(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 1,
             state.editing.as_ref() == Some(&SettingsField::PreviewWidth),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Right Panel Width %",
@@ -1088,6 +1192,7 @@ fn render_layout(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 2,
             state.editing.as_ref() == Some(&SettingsField::RightPanelWidth),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Claude Height %",
@@ -1095,6 +1200,7 @@ fn render_layout(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 3,
             state.editing.as_ref() == Some(&SettingsField::ClaudeHeight),
             &state.input_buffer,
+            state.input_cursor,
         ),
     ];
 
@@ -1137,6 +1243,7 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 0,
             state.editing.as_ref() == Some(&SettingsField::ClaudePath),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "LazyGit Path",
@@ -1144,6 +1251,7 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 1,
             state.editing.as_ref() == Some(&SettingsField::LazygitPath),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "OpenCode Command",
@@ -1151,6 +1259,7 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 2,
             state.editing.as_ref() == Some(&SettingsField::OpenCodeCommand),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Pi Command",
@@ -1158,6 +1267,7 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 3,
             state.editing.as_ref() == Some(&SettingsField::PiCommand),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Codex Command",
@@ -1165,6 +1275,7 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 4,
             state.editing.as_ref() == Some(&SettingsField::CodexCommand),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_dropdown_setting(
             "Browser",
@@ -1172,6 +1283,7 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 5,
             state.editing.as_ref() == Some(&SettingsField::Browser),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_dropdown_setting(
             "External Editor",
@@ -1179,6 +1291,7 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 6,
             state.editing.as_ref() == Some(&SettingsField::ExternalEditor),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Export Directory",
@@ -1186,6 +1299,7 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 7,
             state.editing.as_ref() == Some(&SettingsField::ExportDir),
             &state.input_buffer,
+            state.input_cursor,
         ),
     ];
 
@@ -1201,6 +1315,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 0,
             state.editing.as_ref() == Some(&SettingsField::CompanyName),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Footer Text",
@@ -1208,6 +1323,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 1,
             state.editing.as_ref() == Some(&SettingsField::CompanyFooterText),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Author",
@@ -1215,6 +1331,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 2,
             state.editing.as_ref() == Some(&SettingsField::CompanyAuthor),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Website",
@@ -1222,6 +1339,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 3,
             state.editing.as_ref() == Some(&SettingsField::CompanyWebsite),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Body Font",
@@ -1229,6 +1347,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 4,
             state.editing.as_ref() == Some(&SettingsField::DocBodyFont),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Body Font Size",
@@ -1236,6 +1355,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 5,
             state.editing.as_ref() == Some(&SettingsField::DocBodyFontSize),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Code Font",
@@ -1243,6 +1363,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 6,
             state.editing.as_ref() == Some(&SettingsField::DocCodeFont),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Code Font Size",
@@ -1250,6 +1371,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 7,
             state.editing.as_ref() == Some(&SettingsField::DocCodeFontSize),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Table Font Size",
@@ -1257,6 +1379,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 8,
             state.editing.as_ref() == Some(&SettingsField::DocTableFontSize),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Header Font Size",
@@ -1264,6 +1387,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 9,
             state.editing.as_ref() == Some(&SettingsField::DocHeaderFontSize),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Line Height",
@@ -1271,6 +1395,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 10,
             state.editing.as_ref() == Some(&SettingsField::DocLineHeight),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Code Block BG",
@@ -1278,6 +1403,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 11,
             state.editing.as_ref() == Some(&SettingsField::DocCodeBg),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Heading Separator",
@@ -1285,6 +1411,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 12,
             state.editing.as_ref() == Some(&SettingsField::DocHeadingSeparator),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Table Cell Padding",
@@ -1292,6 +1419,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 13,
             state.editing.as_ref() == Some(&SettingsField::DocTableCellPadding),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Blockquote Border",
@@ -1299,6 +1427,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 14,
             state.editing.as_ref() == Some(&SettingsField::DocBlockquoteBorder),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Table Header BG",
@@ -1306,6 +1435,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 15,
             state.editing.as_ref() == Some(&SettingsField::DocTableHeaderBg),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Table Border",
@@ -1313,6 +1443,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 16,
             state.editing.as_ref() == Some(&SettingsField::DocTableBorder),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Page Size",
@@ -1320,6 +1451,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 17,
             state.editing.as_ref() == Some(&SettingsField::DocPageSize),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Page Margin (all sides)",
@@ -1327,6 +1459,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 18,
             state.editing.as_ref() == Some(&SettingsField::DocPageMargin),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Margin Top (empty=all)",
@@ -1334,6 +1467,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 19,
             state.editing.as_ref() == Some(&SettingsField::DocMarginTop),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Margin Right (empty=all)",
@@ -1341,6 +1475,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 20,
             state.editing.as_ref() == Some(&SettingsField::DocMarginRight),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Margin Bottom (empty=all)",
@@ -1348,6 +1483,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 21,
             state.editing.as_ref() == Some(&SettingsField::DocMarginBottom),
             &state.input_buffer,
+            state.input_cursor,
         ),
         format_setting(
             "Margin Left (empty=all)",
@@ -1355,6 +1491,7 @@ fn render_document(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.selected_idx == 22,
             state.editing.as_ref() == Some(&SettingsField::DocMarginLeft),
             &state.input_buffer,
+            state.input_cursor,
         ),
     ];
 
@@ -1487,27 +1624,60 @@ fn render_app_dropdown(frame: &mut Frame, popup_area: Rect, state: &SettingsStat
     frame.render_widget(list, inner);
 }
 
+/// Build the editing display line with the block cursor at `cursor` char index.
+fn format_editing_line(input_buffer: &str, cursor: usize) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let (prefix, cursor_char, suffix) = split_at_cursor(input_buffer, cursor);
+    spans.push(Span::raw(prefix));
+    spans.push(Span::styled(
+        cursor_char.to_string(),
+        Style::default().add_modifier(Modifier::REVERSED),
+    ));
+    spans.push(Span::raw(suffix));
+    spans
+}
+
+/// Split a string at a char-index cursor. Returns (prefix, cursor_char, suffix).
+/// `cursor_char` is the character at the cursor or '█' if cursor is at the end.
+fn split_at_cursor(s: &str, cursor: usize) -> (String, char, String) {
+    let mut prefix = String::new();
+    let mut suffix = String::new();
+    let mut cursor_char = '█';
+    for (idx, c) in s.chars().enumerate() {
+        if idx < cursor {
+            prefix.push(c);
+        } else if idx == cursor {
+            cursor_char = c;
+        } else {
+            suffix.push(c);
+        }
+    }
+    (prefix, cursor_char, suffix)
+}
+
 fn format_setting(
     label: &str,
     value: &str,
     selected: bool,
     editing: bool,
     input_buffer: &str,
+    input_cursor: usize,
 ) -> ListItem<'static> {
-    let display_value = if editing {
-        format!("{}█", input_buffer)
-    } else {
-        value.to_string()
-    };
-
     let style = if selected {
         Style::default().fg(Color::Black).bg(Color::Cyan)
     } else {
         Style::default()
     };
 
-    let text = format!("{:<25} {}", format!("{}:", label), display_value);
-    ListItem::new(Line::from(text)).style(style)
+    let label_span = Span::raw(format!("{:<25} ", format!("{}:", label)));
+    let mut line = vec![label_span];
+    if editing {
+        line.extend(format_editing_line(input_buffer, input_cursor));
+    } else {
+        line.push(Span::raw(value.to_string()));
+    }
+
+    ListItem::new(Line::from(line)).style(style)
 }
 
 /// Format a dropdown-enabled setting (shows ▼ indicator when not editing)
@@ -1517,21 +1687,23 @@ fn format_dropdown_setting(
     selected: bool,
     editing: bool,
     input_buffer: &str,
+    input_cursor: usize,
 ) -> ListItem<'static> {
-    let display_value = if editing {
-        format!("{}█", input_buffer)
-    } else {
-        format!("{} ▼", value)
-    };
-
     let style = if selected {
         Style::default().fg(Color::Black).bg(Color::Cyan)
     } else {
         Style::default()
     };
 
-    let text = format!("{:<25} {}", format!("{}:", label), display_value);
-    ListItem::new(Line::from(text)).style(style)
+    let label_span = Span::raw(format!("{:<25} ", format!("{}:", label)));
+    let mut line = vec![label_span];
+    if editing {
+        line.extend(format_editing_line(input_buffer, input_cursor));
+    } else {
+        line.push(Span::raw(format!("{} ▼", value)));
+    }
+
+    ListItem::new(Line::from(line)).style(style)
 }
 
 fn format_bool_setting(label: &str, value: bool, selected: bool) -> ListItem<'static> {
@@ -1669,5 +1841,109 @@ mod tests {
         let is_custom = state.dropdown_confirm();
         assert!(is_custom);
         assert!(state.editing.is_some()); // Text editing mode activated
+    }
+
+    #[test]
+    fn test_start_editing_places_cursor_at_end() {
+        let mut state = SettingsState {
+            opencode_command: "opencode --model x".to_string(),
+            ..Default::default()
+        };
+        state.category = SettingsCategory::Paths;
+        state.selected_idx = 2; // OpenCode Command
+        state.start_editing();
+        assert_eq!(state.input_buffer, "opencode --model x");
+        assert_eq!(state.input_cursor, 18);
+    }
+
+    #[test]
+    fn test_cursor_movement_and_insertion() {
+        let mut state = SettingsState {
+            input_buffer: "hello".to_string(),
+            input_cursor: 5,
+            ..Default::default()
+        };
+
+        state.insert_char('!');
+        assert_eq!(state.input_buffer, "hello!");
+        assert_eq!(state.input_cursor, 6);
+
+        state.cursor_left();
+        state.cursor_left();
+        assert_eq!(state.input_cursor, 4);
+
+        state.insert_char('X');
+        assert_eq!(state.input_buffer, "hellXo!");
+        assert_eq!(state.input_cursor, 5);
+
+        state.cursor_home();
+        assert_eq!(state.input_cursor, 0);
+        state.insert_char('>');
+        assert_eq!(state.input_buffer, ">hellXo!");
+
+        state.cursor_end();
+        assert_eq!(state.input_cursor, 8);
+    }
+
+    #[test]
+    fn test_delete_before_and_at_cursor() {
+        let mut state = SettingsState {
+            input_buffer: "ab".to_string(),
+            input_cursor: 1, // between a and b
+            ..Default::default()
+        };
+
+        state.delete_before_cursor();
+        assert_eq!(state.input_buffer, "b");
+        assert_eq!(state.input_cursor, 0);
+
+        state.delete_at_cursor();
+        assert_eq!(state.input_buffer, "");
+        assert_eq!(state.input_cursor, 0);
+    }
+
+    #[test]
+    fn test_insert_str_at_cursor() {
+        let mut state = SettingsState {
+            input_buffer: "opencode ".to_string(),
+            input_cursor: 9, // after "opencode "
+            ..Default::default()
+        };
+        state.insert_str("--model qwen3.5:cloud");
+        assert_eq!(state.input_buffer, "opencode --model qwen3.5:cloud");
+        assert_eq!(state.input_cursor, 30);
+    }
+
+    #[test]
+    fn test_split_at_cursor_positions() {
+        assert_eq!(
+            split_at_cursor("abc", 0),
+            (String::new(), 'a', "bc".to_string())
+        );
+        assert_eq!(
+            split_at_cursor("abc", 2),
+            ("ab".to_string(), 'c', String::new())
+        );
+        assert_eq!(
+            split_at_cursor("abc", 3),
+            ("abc".to_string(), '█', String::new())
+        );
+    }
+
+    #[test]
+    fn test_finish_editing_resets_cursor_and_buffer() {
+        let mut state = SettingsState {
+            category: SettingsCategory::Paths,
+            selected_idx: 2,
+            ..Default::default()
+        };
+        state.start_editing();
+        state.input_buffer = "opencode --model x".to_string();
+        state.input_cursor = 5;
+        state.finish_editing();
+        assert_eq!(state.opencode_command, "opencode --model x");
+        assert!(state.editing.is_none());
+        assert_eq!(state.input_buffer, "");
+        assert_eq!(state.input_cursor, 0);
     }
 }

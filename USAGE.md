@@ -30,6 +30,17 @@
 | Shift+F8 | Settings |
 | F9 | File Menu (File Browser) / Copy last command block (Terminal) or last N lines (Claude, LazyGit) |
 | Shift+F9 | Copy last N lines with interactive count input (Terminal panes) |
+
+#### Settings / Input Dialogs (when editing a text field)
+| Key | Action |
+|-----|--------|
+| ← / → | Move cursor one character |
+| Home / End | Jump to start / end of line |
+| Backspace | Delete character before cursor |
+| Delete | Delete character at cursor |
+| Ctrl+V / Cmd+V | Paste from clipboard |
+| Ctrl+C / Esc | Cancel editing |
+| Enter | Confirm value |
 | F10 | About |
 | F12 | Help |
 | Esc | Close Dialogs/Help |
@@ -423,6 +434,17 @@ strategy with `CLAUDE_WORKBENCH_CLIPBOARD=osc52|arboard|subprocess`.
 | F10 | Über |
 | F12 | Hilfe |
 | Esc | Dialoge/Hilfe schließen |
+
+#### Einstellungen / Eingabedialoge (bei Bearbeitung eines Textfelds)
+| Taste | Aktion |
+|-------|--------|
+| ← / → | Cursor um ein Zeichen bewegen |
+| Home / End | An Zeilenanfang / -ende springen |
+| Backspace | Zeichen vor dem Cursor löschen |
+| Delete | Zeichen am Cursor löschen |
+| Ctrl+V / Cmd+V | Aus Zwischenablage einfügen |
+| Ctrl+C / Esc | Bearbeitung abbrechen |
+| Enter | Wert bestätigen |
 | Alt+Shift+Links | Dateibrowser-Breite verkleinern |
 | Alt+Shift+Rechts | Dateibrowser-Breite vergrößern |
 | Alt+Shift+Oben | Claude-Bereich verkleinern |
