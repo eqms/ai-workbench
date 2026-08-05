@@ -7,6 +7,16 @@ unmaintained = "warn"
 yanked = "warn"
 notice = "warn"
 
+# Kept in sync with .cargo/audit.toml — see that file for the full reachability
+# analysis. Both entries are quick-xml DoS advisories reached only through
+# typst's CSL bibliography parser (never fed user input) and through the
+# build-time wayland-scanner proc-macro. Neither is fixable via `cargo update`:
+# citationberg pins ^0.38, wayland-scanner pins ^0.39.
+ignore = [
+    "RUSTSEC-2026-0194",  # quick-xml: quadratic duplicate-attribute check
+    "RUSTSEC-2026-0195",  # quick-xml: unbounded namespace allocation (DoS)
+]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "allow"

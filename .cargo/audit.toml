@@ -1,0 +1,33 @@
+# cargo-audit configuration
+#
+# Every entry below is a transitive advisory that has been traced to its
+# dependency path and found unreachable from ai-workbench's code. Re-verify with
+# `cargo tree -i <crate>` whenever the lockfile changes, and remove the ignore as
+# soon as an upstream release lets `cargo update` resolve it.
+
+[advisories]
+ignore = [
+    # quick-xml — memory-exhaustion DoS in NsReader (RUSTSEC-2026-0195) and
+    # quadratic duplicate-attribute checking (RUSTSEC-2026-0194). Two paths, both
+    # unreachable:
+    #
+    #  1. quick-xml 0.38.4 via typst-library -> hayagriva -> citationberg, the CSL
+    #     bibliography parser. ai-workbench generates its own Typst source from
+    #     Markdown and never loads a user-supplied .csl; World::source() only
+    #     returns the generated document and World::file() is traversal-guarded
+    #     (src/browser/typst_pdf.rs).
+    #  2. quick-xml 0.39.4 via arboard -> wl-clipboard-rs -> wayland-scanner,
+    #     a proc-macro. It runs at build time over the Wayland protocol XML that
+    #     ships with the crate — no runtime exposure, Linux only.
+    #
+    # Not fixable via `cargo update`: citationberg pins ^0.38, wayland-scanner
+    # pins ^0.39. Both need upstream releases.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]
+
+# Unmaintained/yanked crates are reported as warnings, not failures, and are left
+# visible on purpose:
+#   serial 0.4.0     (portable-pty)  — unmaintained since 2017, worth watching
+#   bincode, yaml-rust (syntect)
+#   rustybuzz, ttf-parser, paste, spin (typst, dropped by --no-default-features)

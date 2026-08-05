@@ -26,6 +26,25 @@ pub struct Config {
     pub document: DocumentConfig,
     #[serde(default)]
     pub ssh: SshConfig,
+    #[serde(default)]
+    pub git: GitConfig,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct GitConfig {
+    /// Run `git fetch` automatically when the file browser enters a repository.
+    ///
+    /// Off by default. A fetch executes the *repository's own* configuration —
+    /// `remote.<name>.url = ext::sh -c …`, `core.sshCommand`, `credential.helper`
+    /// are all code-execution vectors — so an automatic fetch would turn "browse
+    /// into a directory" into "run whatever that directory chose". Git's
+    /// `safe.directory` guard does not help here: it only rejects repositories
+    /// owned by a *different* user, and an unpacked archive or a fresh clone is
+    /// owned by you.
+    ///
+    /// Enable only for trees you control. Manual pull (`Ctrl+G`) is unaffected.
+    #[serde(default)]
+    pub auto_fetch: bool,
 }
 
 /// PTY configuration for all terminal panes
@@ -398,6 +417,7 @@ impl Default for Config {
             claude: ClaudeConfig::default(),
             document: DocumentConfig::default(),
             ssh: SshConfig::default(),
+            git: GitConfig::default(),
         }
     }
 }
@@ -804,13 +824,167 @@ pub(crate) fn get_config_dir() -> Option<std::path::PathBuf> {
     dirs::home_dir().map(|home| home.join(".config").join("ai-workbench"))
 }
 
+/// File name of the repository-local config, relative to the working directory.
+pub const LOCAL_CONFIG_NAME: &str = "config.yaml";
+
+/// Name of the trust allowlist inside the user's config directory.
+const TRUSTED_CONFIGS_FILE: &str = "trusted_configs.yaml";
+
+/// One approved repository-local `config.yaml`, pinned to the exact content
+/// that was approved.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrustedConfig {
+    /// Canonicalized absolute path of the approved file.
+    pub path: String,
+    /// Lowercase hex SHA-256 of the bytes that were approved.
+    pub sha256: String,
+}
+
+/// What happened to a repository-local `./config.yaml` during [`load_config`].
+///
+/// A repo-local config drives `pty.*_command` and `terminal.shell_path`, which
+/// are spawned as processes at startup. Loading whatever `config.yaml` happens
+/// to sit in the working directory therefore turns "clone a repo and start the
+/// tool in it" into arbitrary code execution — the same reason direnv requires
+/// an explicit `direnv allow`. So the file is only honored after the user
+/// approved that exact content once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalConfigStatus {
+    /// No `./config.yaml` in the working directory — nothing to decide.
+    Absent,
+    /// Approved earlier and byte-identical since; loaded.
+    Trusted,
+    /// Present but never approved — ignored.
+    Untrusted,
+    /// Approved earlier, but the content changed since — ignored.
+    Changed,
+}
+
+impl LocalConfigStatus {
+    /// A user-facing warning, or `None` when there is nothing to report.
+    pub fn warning(&self) -> Option<String> {
+        let reason = match self {
+            LocalConfigStatus::Absent | LocalConfigStatus::Trusted => return None,
+            LocalConfigStatus::Untrusted => "has not been approved",
+            LocalConfigStatus::Changed => "changed since it was approved",
+        };
+        Some(format!(
+            "Ignoring ./{LOCAL_CONFIG_NAME}: it {reason}.\n  \
+             This file can set the commands ai-workbench spawns, so it is only used \
+             after you approve it.\n  \
+             Review it, then run: ai-workbench --trust-local-config"
+        ))
+    }
+}
+
+/// Lowercase hex SHA-256 of `bytes`.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+/// Absolute path of the trust allowlist, or `None` if no config dir resolves.
+fn trusted_configs_path() -> Option<std::path::PathBuf> {
+    get_config_dir().map(|d| d.join(TRUSTED_CONFIGS_FILE))
+}
+
+/// Read the trust allowlist. A missing or unparseable file yields an empty
+/// list — failing closed, so a corrupted allowlist never grants trust.
+pub fn load_trusted_configs() -> Vec<TrustedConfig> {
+    let Some(path) = trusted_configs_path() else {
+        return Vec::new();
+    };
+    fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_yaml_ng::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Persist the trust allowlist with owner-only permissions.
+fn save_trusted_configs(entries: &[TrustedConfig]) -> Result<()> {
+    let path = trusted_configs_path()
+        .ok_or_else(|| anyhow::anyhow!("No config directory available for the trust allowlist"))?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, serde_yaml_ng::to_string(entries)?)?;
+    set_restrictive_permissions(&path)?;
+    Ok(())
+}
+
+/// Classify `./config.yaml` against the trust allowlist.
+///
+/// The lookup key is the canonicalized path *and* the content hash, so
+/// approving a config approves that exact content — a later edit (or a
+/// `git pull` that rewrites it) drops back to [`LocalConfigStatus::Changed`].
+pub fn local_config_status() -> LocalConfigStatus {
+    let local = Path::new(LOCAL_CONFIG_NAME);
+    let Ok(contents) = fs::read(local) else {
+        return LocalConfigStatus::Absent;
+    };
+    let Ok(canonical) = local.canonicalize() else {
+        return LocalConfigStatus::Absent;
+    };
+    classify_local_config(
+        &canonical.to_string_lossy(),
+        &contents,
+        &load_trusted_configs(),
+    )
+}
+
+/// Pure classification core of [`local_config_status`], split out so the trust
+/// decision is testable without touching the filesystem, the working directory,
+/// or `XDG_CONFIG_HOME`.
+fn classify_local_config(
+    canonical: &str,
+    contents: &[u8],
+    trusted: &[TrustedConfig],
+) -> LocalConfigStatus {
+    let actual = sha256_hex(contents);
+    match trusted.iter().find(|e| e.path == canonical) {
+        Some(entry) if entry.sha256 == actual => LocalConfigStatus::Trusted,
+        Some(_) => LocalConfigStatus::Changed,
+        None => LocalConfigStatus::Untrusted,
+    }
+}
+
+/// Approve the current directory's `./config.yaml` (the `--trust-local-config`
+/// CLI action). Returns the canonical path that was recorded.
+pub fn trust_local_config() -> Result<std::path::PathBuf> {
+    let local = Path::new(LOCAL_CONFIG_NAME);
+    let contents = fs::read(local)
+        .map_err(|e| anyhow::anyhow!("Cannot read ./{}: {}", LOCAL_CONFIG_NAME, e))?;
+
+    // Parse before approving: an unparseable file would be silently skipped at
+    // startup anyway, and approving it would only hide the real problem.
+    serde_yaml_ng::from_str::<Config>(&String::from_utf8_lossy(&contents))
+        .map_err(|e| anyhow::anyhow!("./{} is not a valid config: {}", LOCAL_CONFIG_NAME, e))?;
+
+    let canonical = local.canonicalize()?;
+    let key = canonical.to_string_lossy().to_string();
+    let sha256 = sha256_hex(&contents);
+
+    let mut entries = load_trusted_configs();
+    entries.retain(|e| e.path != key);
+    entries.push(TrustedConfig { path: key, sha256 });
+    save_trusted_configs(&entries)?;
+    Ok(canonical)
+}
+
 pub fn load_config() -> Result<Config> {
-    // 1. Check local config.yaml (project-specific override)
-    let local_config = Path::new("config.yaml");
-    if local_config.exists() {
-        let contents = fs::read_to_string(local_config)?;
-        let config: Config = serde_yaml_ng::from_str(&contents)?;
-        return Ok(config);
+    load_config_checked().map(|(config, _)| config)
+}
+
+/// Like [`load_config`], but also reports what happened to `./config.yaml`
+/// so the caller can surface a warning.
+pub fn load_config_checked() -> Result<(Config, LocalConfigStatus)> {
+    let status = local_config_status();
+
+    // 1. Repository-local config.yaml — only when explicitly approved.
+    if status == LocalConfigStatus::Trusted {
+        let contents = fs::read_to_string(LOCAL_CONFIG_NAME)?;
+        return Ok((serde_yaml_ng::from_str(&contents)?, status));
     }
 
     // 2. Check ~/.config/ai-workbench/config.yaml (XDG-style)
@@ -819,12 +993,12 @@ pub fn load_config() -> Result<Config> {
         if config_path.exists() {
             let contents = fs::read_to_string(&config_path)?;
             let config: Config = serde_yaml_ng::from_str(&contents)?;
-            return Ok(config);
+            return Ok((config, status));
         }
     }
 
     // Fallback to default config
-    Ok(Config::default())
+    Ok((Config::default(), status))
 }
 
 /// Set restrictive file permissions (0600 - owner read/write only) on Unix systems
@@ -842,14 +1016,20 @@ fn set_restrictive_permissions(_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Save config - updates local config.yaml if it exists, otherwise XDG config
+/// Save config - updates local config.yaml if it is trusted, otherwise XDG config
 pub fn save_config(config: &Config) -> Result<()> {
-    // If local config.yaml exists, update it (maintains project-specific settings)
-    let local_config = Path::new("config.yaml");
-    if local_config.exists() {
+    // Update the repository-local config.yaml only if it is the one we actually
+    // loaded. Writing into an unapproved file would both leak the user's
+    // settings into an untrusted tree and mislead them about which file is live.
+    let local_config = Path::new(LOCAL_CONFIG_NAME);
+    if local_config_status() == LocalConfigStatus::Trusted {
         let yaml = serde_yaml_ng::to_string(config)?;
         fs::write(local_config, &yaml)?;
         set_restrictive_permissions(local_config)?;
+        // Re-pin the allowlist to the content we just wrote — otherwise our own
+        // save would invalidate the approval and the file would be ignored on
+        // the next start.
+        trust_local_config()?;
         return Ok(());
     }
 
@@ -872,6 +1052,110 @@ pub fn get_config_path() -> Option<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sha256_hex_matches_known_vectors() {
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn sha256_hex_is_content_sensitive() {
+        // The whole point of pinning: a one-byte edit must invalidate approval.
+        assert_ne!(sha256_hex(b"theme: default"), sha256_hex(b"theme: defaulT"));
+    }
+
+    #[test]
+    fn absent_and_trusted_produce_no_warning() {
+        assert!(LocalConfigStatus::Absent.warning().is_none());
+        assert!(LocalConfigStatus::Trusted.warning().is_none());
+    }
+
+    #[test]
+    fn untrusted_and_changed_warn_with_remediation() {
+        for status in [LocalConfigStatus::Untrusted, LocalConfigStatus::Changed] {
+            let warning = status.warning().expect("must warn");
+            assert!(
+                warning.contains("--trust-local-config"),
+                "warning must tell the user how to proceed, got: {warning}"
+            );
+        }
+    }
+
+    fn entry(path: &str, contents: &[u8]) -> TrustedConfig {
+        TrustedConfig {
+            path: path.to_string(),
+            sha256: sha256_hex(contents),
+        }
+    }
+
+    #[test]
+    fn unknown_config_is_untrusted() {
+        // The core of the fix: a config.yaml nobody approved must never load.
+        assert_eq!(
+            classify_local_config("/repo/config.yaml", b"theme: default", &[]),
+            LocalConfigStatus::Untrusted
+        );
+    }
+
+    #[test]
+    fn approved_and_unchanged_config_is_trusted() {
+        let body = b"theme: default";
+        let allowlist = vec![entry("/repo/config.yaml", body)];
+        assert_eq!(
+            classify_local_config("/repo/config.yaml", body, &allowlist),
+            LocalConfigStatus::Trusted
+        );
+    }
+
+    #[test]
+    fn edited_config_loses_its_approval() {
+        // A `git pull` that rewrites an approved config must not stay trusted.
+        let allowlist = vec![entry("/repo/config.yaml", b"theme: default")];
+        assert_eq!(
+            classify_local_config(
+                "/repo/config.yaml",
+                b"pty:\n  claude_command: [\"/tmp/pwned\"]",
+                &allowlist
+            ),
+            LocalConfigStatus::Changed
+        );
+    }
+
+    #[test]
+    fn approval_does_not_transfer_to_another_path() {
+        // Same bytes in a different directory are a different decision.
+        let body = b"theme: default";
+        let allowlist = vec![entry("/repo-a/config.yaml", body)];
+        assert_eq!(
+            classify_local_config("/repo-b/config.yaml", body, &allowlist),
+            LocalConfigStatus::Untrusted
+        );
+    }
+
+    #[test]
+    fn git_auto_fetch_defaults_to_off() {
+        // Security-relevant default: fetching runs the target repo's own config.
+        assert!(
+            !Config::default().git.auto_fetch,
+            "auto_fetch must default to off"
+        );
+        assert!(!GitConfig::default().auto_fetch);
+    }
+
+    #[test]
+    fn config_without_git_section_still_parses() {
+        // Backward compatibility: existing config.yaml files predate `git:`.
+        let yaml = "terminal:\n  shell_path: /bin/bash\n  shell_args: []\nui:\n  theme: default\n";
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("legacy config must parse");
+        assert!(!config.git.auto_fetch);
+    }
 
     #[test]
     fn default_shell_path_is_nonempty() {

@@ -47,6 +47,13 @@ struct Args {
     #[arg(long)]
     check_update: bool,
 
+    /// Approve the current directory's ./config.yaml and exit.
+    /// A repository-local config can set the commands ai-workbench spawns, so
+    /// it is ignored until approved. The approval pins the exact file content —
+    /// editing it later requires approving it again.
+    #[arg(long)]
+    trust_local_config: bool,
+
     /// Fake current version for testing (e.g., "0.37.0").
     /// Only available in debug builds to prevent update-suppression attacks.
     #[cfg(debug_assertions)]
@@ -78,7 +85,7 @@ struct Args {
     /// TUI). Reports SSH session state, the terminal file-transfer capability
     /// (iTerm2/WezTerm/Kitty/none), relevant environment variables, the
     /// effective export directory, and the configured `remote_transfer` mode.
-    /// Use when `o` / `Ctrl+X` export doesn't reach your Mac over SSH.
+    /// Use when `o` / `Ctrl+X` export doesn't reach your local machine over SSH.
     #[arg(long)]
     open_diag: bool,
 
@@ -89,6 +96,40 @@ struct Args {
     /// see whether the terminal reports it (or a key binding intercepts it).
     #[arg(long)]
     key_diag: bool,
+}
+
+/// Approve the current directory's `./config.yaml` from the CLI and exit.
+///
+/// The repo-local config drives `pty.*_command` and `terminal.shell_path`, which
+/// are spawned at startup, so it is ignored until the user vouches for that exact
+/// content. This is the `direnv allow` of ai-workbench.
+fn run_trust_local_config_cli() -> Result<()> {
+    let path = std::path::Path::new(config::LOCAL_CONFIG_NAME);
+    if !path.exists() {
+        eprintln!(
+            "No ./{} in the current directory — nothing to approve.",
+            config::LOCAL_CONFIG_NAME
+        );
+        std::process::exit(1);
+    }
+
+    println!("Review this file before approving — it can set the commands ai-workbench spawns:");
+    println!("  {}", path.canonicalize()?.display());
+    println!();
+
+    match config::trust_local_config() {
+        Ok(approved) => {
+            println!("✅ Approved: {}", approved.display());
+            println!(
+                "   Pinned to the current content. Editing the file requires approving it again."
+            );
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("❌ Could not approve: {}", e);
+            std::process::exit(1);
+        }
+    }
 }
 
 /// Run update check from CLI and exit
@@ -278,7 +319,7 @@ fn run_clipboard_diag_cli() -> Result<()> {
 ///  2. `cc-clip` binary on `$PATH`.
 ///  3. TCP reachability of the cc-clip daemon on `127.0.0.1:9998` —
 ///     when set up correctly the user runs `ssh -R 9998:localhost:9998`
-///     so the remote port forwards to the Mac-side daemon.
+///     so the remote port forwards to the daemon on the local machine.
 fn run_ssh_paste_diag_cli() -> Result<()> {
     use std::net::{SocketAddr, TcpStream};
     use std::time::Duration;
@@ -317,16 +358,16 @@ fn run_ssh_paste_diag_cli() -> Result<()> {
     }
     println!();
 
-    // 3. cc-clip daemon port reachability (the daemon runs on the Mac;
-    //    `ssh -R 9998:localhost:9998` exposes it on this host).
+    // 3. cc-clip daemon port reachability (the daemon runs on the local SSH
+    //    client machine; `ssh -R 9998:localhost:9998` exposes it on this host).
     println!("Daemon reachability (127.0.0.1:9998):");
     let addr: SocketAddr = "127.0.0.1:9998".parse().expect("hardcoded address parses");
     match TcpStream::connect_timeout(&addr, Duration::from_millis(500)) {
         Ok(_) => println!("  ✓ port 9998 reachable — daemon or reverse-tunnel is up"),
         Err(e) => {
             println!("  ✗ port 9998 unreachable: {}", e);
-            println!("    On your Mac:    start the cc-clip daemon");
-            println!("    ~/.ssh/config:  RemoteForward 9998 localhost:9998");
+            println!("    On your local machine:  start the cc-clip daemon");
+            println!("    ~/.ssh/config:         RemoteForward 9998 localhost:9998");
         }
     }
     println!();
@@ -394,7 +435,7 @@ fn run_open_diag_cli() -> Result<()> {
 
     match effective {
         TransferCapability::Iterm2 | TransferCapability::WezTerm => {
-            println!("→ Files will stream to your Mac's ~/Downloads over the SSH TTY.");
+            println!("→ Files will stream to your local ~/Downloads over the SSH TTY.");
         }
         TransferCapability::Kitty => {
             println!("→ Kitty file transfer isn't implemented; files stay on the server");
@@ -555,6 +596,11 @@ fn main() -> Result<()> {
         return run_update_check_cli(fake_version);
     }
 
+    // Handle --trust-local-config CLI mode (exit without starting TUI)
+    if args.trust_local_config {
+        return run_trust_local_config_cli();
+    }
+
     // Handle --update-to CLI mode (update to specific version and exit)
     // Only available in debug builds (field is cfg-gated in Args struct)
     #[cfg(debug_assertions)]
@@ -631,10 +677,16 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
         );
     }
 
-    let config = load_config()?;
+    let (config, local_config_status) = config::load_config_checked()?;
     {
         let mut err = std::io::stderr();
         let _ = writeln!(err, "  config loaded ({} ms)", t0.elapsed().as_millis());
+        // Warn before ratatui takes the alternate screen — a repo-local config
+        // that is silently skipped would otherwise look like the tool ignoring
+        // the user's settings for no reason.
+        if let Some(warning) = local_config_status.warning() {
+            let _ = writeln!(err, "  ⚠️  {}", warning);
+        }
     }
 
     let session = load_session();

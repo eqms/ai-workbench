@@ -2,7 +2,7 @@
 //!
 //! When the workbench runs on a remote (SSH) host, the exported/previewed
 //! file lives on the *server* — `xdg-open` there is useless and, worse, can
-//! grab the TUI's TTY. Instead we stream the file to the user's Mac terminal
+//! grab the TUI's TTY. Instead we stream the file to the user's local terminal
 //! (iTerm2 / WezTerm) via iTerm2's proprietary "File Download" escape code,
 //! which lands the bytes in the local `~/Downloads` folder over the existing
 //! SSH connection — no daemon, no port forwarding.

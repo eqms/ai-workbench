@@ -293,24 +293,26 @@ When copying to Claude, output is automatically filtered:
 
 ### SSH Image Paste
 
-When you connect from a Mac via SSH (e.g. iTerm2 → Linux server) and run
-ai-workbench remotely, **text paste (`Cmd+V`) works** but **image paste
-(`Ctrl+V`)** in the Claude pane does **not** — Claude Code on the remote
-host can only see the local Linux clipboard, not your Mac pasteboard.
+When you connect via SSH (e.g. from a macOS or Linux workstation to a remote
+server) and run ai-workbench remotely, **text paste (`Cmd+V` / `Ctrl+Shift+V`)
+works** but **image paste (`Ctrl+V`)** in the Claude pane does **not** — Claude
+Code on the remote host can only see the remote clipboard, not the clipboard of
+your local machine.
 
 ai-workbench detects this scenario and integrates with
 [`cc-clip`](https://github.com/ShunmeiCho/cc-clip), an external bridge that
-forwards images from your Mac pasteboard to the remote host over an SSH
+forwards images from your local clipboard to the remote host over an SSH
 reverse tunnel.
 
 **Setup (one-time):**
 
 ```bash
-# 1. On your Mac
-brew install shunmeicho/tap/cc-clip
-cc-clip-daemon &     # or as a LaunchAgent
+# 1. On your local machine
+brew install shunmeicho/tap/cc-clip   # macOS
+cargo install cc-clip                 # Linux
+cc-clip-daemon &     # or as a LaunchAgent / systemd user unit
 
-# 2. ~/.ssh/config (Mac side)
+# 2. ~/.ssh/config (local side)
 Host my-server
     RemoteForward 9998 localhost:9998
 
@@ -342,12 +344,12 @@ image paste to work.
 When you run ai-workbench on a remote (SSH) host, `o` (browser preview)
 and `Ctrl+X` export used to run `xdg-open` **on the server** — with no display
 that hijacks and corrupts the TUI's terminal. Now, on an SSH session the file
-is instead **streamed to your local Mac terminal**:
+is instead **streamed to your local terminal**:
 
-- **iTerm2 / WezTerm**: the file is transferred via iTerm2's OSC 1337 "File
-  Download" escape over the existing SSH connection and lands in your Mac's
-  `~/Downloads` (no daemon, no port forwarding). Open it there. Large PDFs use
-  the multipart protocol automatically.
+- **iTerm2 / WezTerm** (macOS or Linux): the file is transferred via iTerm2's
+  OSC 1337 "File Download" escape over the existing SSH connection and lands in
+  your local `~/Downloads` (no daemon, no port forwarding). Open it there. Large
+  PDFs use the multipart protocol automatically.
 - **Terminus/Tabby, plain xterm, Kitty**: no transfer support — the file stays
   on the server and its path is shown in the footer (`💾 Saved on server: …`);
   the TUI is never corrupted.
@@ -699,25 +701,26 @@ Beim Kopieren zu Claude wird die Ausgabe automatisch gefiltert:
 
 ### Bild-Paste über SSH
 
-Wenn Du Dich von einem Mac via SSH (z. B. iTerm2 → Linux-Server) verbindest
-und ai-workbench dort startest, funktioniert **Text-Paste (`Cmd+V`)**
-problemlos, aber **Bild-Paste (`Ctrl+V`)** im Claude-Pane **nicht** —
-Claude Code auf dem Server liest nur das lokale Linux-Clipboard, nicht
-das Mac-Pasteboard.
+Wenn Du Dich via SSH verbindest (z. B. von einer macOS- oder Linux-Workstation
+auf einen Server) und ai-workbench dort startest, funktioniert **Text-Paste
+(`Cmd+V` / `Ctrl+Shift+V`)** problemlos, aber **Bild-Paste (`Ctrl+V`)** im
+Claude-Pane **nicht** — Claude Code auf dem Server liest nur die Zwischenablage
+des Servers, nicht die Deines lokalen Rechners.
 
 ai-workbench erkennt diese Situation und integriert mit
 [`cc-clip`](https://github.com/ShunmeiCho/cc-clip), einer externen Bridge
-die Bilder vom Mac-Pasteboard über einen SSH-Reverse-Tunnel zum Server
-überträgt.
+die Bilder von der lokalen Zwischenablage über einen SSH-Reverse-Tunnel zum
+Server überträgt.
 
 **Einmaliges Setup:**
 
 ```bash
-# 1. Auf dem Mac
-brew install shunmeicho/tap/cc-clip
-cc-clip-daemon &     # oder als LaunchAgent
+# 1. Auf dem lokalen Rechner
+brew install shunmeicho/tap/cc-clip   # macOS
+cargo install cc-clip                 # Linux
+cc-clip-daemon &     # oder als LaunchAgent / systemd-User-Unit
 
-# 2. ~/.ssh/config (Mac-Seite)
+# 2. ~/.ssh/config (lokale Seite)
 Host mein-server
     RemoteForward 9998 localhost:9998
 
@@ -749,13 +752,14 @@ grün sein, damit Bild-Paste funktioniert.
 Läuft ai-workbench auf einem Remote-Server (SSH), riefen `o` (Browser-
 Vorschau) und der `Ctrl+X`-Export bisher `xdg-open` **auf dem Server** auf —
 ohne Display kapert das die TUI-TTY und zerschießt den Bildschirm. Jetzt wird
-die Datei bei einer SSH-Session stattdessen **an dein lokales Mac-Terminal
+die Datei bei einer SSH-Session stattdessen **an dein lokales Terminal
 übertragen**:
 
-- **iTerm2 / WezTerm**: Die Datei wird über die iTerm2-OSC-1337-„File
-  Download"-Escape-Sequenz über die bestehende SSH-Verbindung übertragen und
-  landet in `~/Downloads` auf deinem Mac (kein Daemon, kein Port-Forwarding).
-  Dort öffnen. Große PDFs nutzen automatisch das Multipart-Protokoll.
+- **iTerm2 / WezTerm** (macOS oder Linux): Die Datei wird über die
+  iTerm2-OSC-1337-„File Download"-Escape-Sequenz über die bestehende
+  SSH-Verbindung übertragen und landet lokal in `~/Downloads` (kein Daemon,
+  kein Port-Forwarding). Dort öffnen. Große PDFs nutzen automatisch das
+  Multipart-Protokoll.
 - **Terminus/Tabby, reines xterm, Kitty**: Kein Transfer-Support — die Datei
   bleibt auf dem Server, der Pfad wird im Footer angezeigt (`💾 Saved on
   server: …`); die TUI wird nie zerschossen.

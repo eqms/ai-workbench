@@ -9,13 +9,57 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::mpsc;
 
+/// Build a `git` invocation that the target repository cannot hijack.
+///
+/// Every git command reads the config of the repository it runs in, and several
+/// config keys are command-execution vectors. Since the file browser runs git in
+/// whatever directory the user navigates into — including trees that came from
+/// an untrusted archive or clone — each of these has to be pinned on the command
+/// line, where repo config cannot override it:
+///
+/// - `core.fsmonitor`  — runs a helper binary on `git status`
+/// - `core.sshCommand` — replaces `ssh` during fetch
+/// - `core.gitProxy`   — runs a command for `git://` remotes
+/// - `credential.helper` — runs a helper binary during fetch (empty value
+///   clears the inherited list rather than appending to it)
+/// - `protocol.ext.allow` — `ext::sh -c '…'` remote URLs
+/// - `core.pager` / `GIT_TERMINAL_PROMPT` / `GIT_ASKPASS` — keep git
+///   non-interactive so it never spawns a pager or prompt helper
+///
+/// This shrinks the surface but does not eliminate it: `.gitattributes` plus a
+/// `filter.<name>.clean` entry can still run a command during `git status`, and
+/// git offers no single switch to disable all filters. That residual risk is why
+/// [`crate::config::GitConfig::auto_fetch`] defaults to off — hardening is the
+/// second line of defense, not the first.
+fn git_command(repo: &Path) -> Command {
+    let mut cmd = Command::new("git");
+    cmd.args([
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.sshCommand=ssh",
+        "-c",
+        "core.gitProxy=",
+        "-c",
+        "core.pager=cat",
+        "-c",
+        "credential.helper=",
+        "-c",
+        "protocol.ext.allow=never",
+    ])
+    .current_dir(repo)
+    .env("GIT_TERMINAL_PROMPT", "0")
+    .env("GIT_ASKPASS", "")
+    .env("GIT_PAGER", "cat");
+    cmd
+}
+
 /// Find the git repository root for a given path
 pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
     let path = if path.is_file() { path.parent()? } else { path };
 
-    let output = Command::new("git")
+    let output = git_command(path)
         .args(["rev-parse", "--show-toplevel"])
-        .current_dir(path)
         .output()
         .ok()?;
 
@@ -29,9 +73,8 @@ pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
 
 /// Get the current branch name for a repository
 pub fn get_current_branch(repo_root: &Path) -> Option<String> {
-    let output = Command::new("git")
+    let output = git_command(repo_root)
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(repo_root)
         .output()
         .ok()?;
 
@@ -49,9 +92,8 @@ fn parse_git_status(repo_root: &Path) -> HashMap<PathBuf, GitFileStatus> {
 
     // Get tracked file changes (modified, staged, etc.) and ignored files
     // Using --ignored=matching to show only top-level ignored patterns (performance)
-    let output = Command::new("git")
+    let output = git_command(repo_root)
         .args(["status", "--porcelain", "-uall", "--ignored=matching"])
-        .current_dir(repo_root)
         .output();
 
     if let Ok(output) = output {
@@ -152,13 +194,12 @@ pub fn aggregate_directory_status(
 /// Returns None if no upstream configured or on error
 fn get_commits_behind(repo_root: &Path, branch: &str) -> Option<usize> {
     // Get the upstream tracking branch
-    let output = Command::new("git")
+    let output = git_command(repo_root)
         .args([
             "rev-parse",
             "--abbrev-ref",
             &format!("{}@{{upstream}}", branch),
         ])
-        .current_dir(repo_root)
         .output()
         .ok()?;
 
@@ -169,9 +210,8 @@ fn get_commits_behind(repo_root: &Path, branch: &str) -> Option<usize> {
     let upstream = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
     // Count commits: local..remote (how many commits remote is ahead)
-    let output = Command::new("git")
+    let output = git_command(repo_root)
         .args(["rev-list", "--count", &format!("{}..{}", branch, upstream)])
-        .current_dir(repo_root)
         .output()
         .ok()?;
 
@@ -194,10 +234,7 @@ pub fn check_remote_changes_async(
 
     std::thread::spawn(move || {
         // Step 1: Fetch from remote (quiet mode, don't merge)
-        let fetch_result = Command::new("git")
-            .args(["fetch", "--quiet"])
-            .current_dir(&repo)
-            .output();
+        let fetch_result = git_command(&repo).args(["fetch", "--quiet"]).output();
 
         if let Err(e) = fetch_result {
             let _ = tx.send(GitRemoteCheckResult::Error(e.to_string()));
@@ -241,9 +278,8 @@ pub fn check_remote_changes_async(
 
 /// Execute git pull (blocking operation)
 pub fn pull(repo_root: &Path) -> Result<String, String> {
-    let output = Command::new("git")
+    let output = git_command(repo_root)
         .args(["pull"])
-        .current_dir(repo_root)
         .output()
         .map_err(|e| e.to_string())?;
 

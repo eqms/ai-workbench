@@ -17,7 +17,11 @@ impl App {
             (None, None) => false,    // Still no repo
         };
 
-        if repo_changed && !self.git_remote.checking {
+        // Auto-fetch is opt-in: `git fetch` executes the target repository's own
+        // config (`remote.<n>.url = ext::…`, `core.sshCommand`, …), so firing it
+        // on mere navigation would let any browsed directory run code. Local
+        // status colors below do not need the network and stay unconditional.
+        if repo_changed && self.config.git.auto_fetch && !self.git_remote.checking {
             if let Some(repo_root) = &current_repo {
                 // Get current branch
                 if let Some(branch) = git::get_current_branch(repo_root) {

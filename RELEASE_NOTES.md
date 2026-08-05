@@ -1,5 +1,99 @@
 # Release Notes
 
+## Version 1.10.0 (29.07.2026)
+
+Security release. Two issues let a directory you merely *open* decide what code
+ai-workbench runs. Both are fixed by making the dangerous behavior opt-in, so
+this release changes defaults — see "Changed" for what you may need to re-enable.
+
+### Security
+
+- **[FIX] A repository-local `config.yaml` is no longer trusted automatically.**
+  `load_config()` read `./config.yaml` from the working directory with the
+  highest priority and no provenance check. That file sets `pty.claude_command`,
+  `pty.lazygit_command` and `terminal.shell_path`, which are spawned as processes
+  at startup — so cloning an untrusted repository and starting the workbench in it
+  was enough to run attacker-chosen binaries in all three panes, silently.
+
+  A repo-local config is now ignored until you approve it once:
+
+  ```bash
+  ai-workbench --trust-local-config    # review the file first, then approve
+  ```
+
+  The approval is pinned to the file's exact content (SHA-256) and its
+  canonical path, recorded in `~/.config/ai-workbench/trusted_configs.yaml`
+  (mode 0600). Editing the file — or a `git pull` that rewrites it — drops the
+  approval, so a config cannot be swapped out under an existing trust. When a
+  local config is skipped, startup prints a warning to stderr naming the file and
+  the command to approve it. Saving settings writes to the repo-local file only
+  while it is trusted, and re-pins the hash afterwards; otherwise settings go to
+  the XDG config as before.
+
+- **[FIX] `git fetch` no longer runs automatically when browsing into a repository.**
+  Entering a directory in the file browser triggered an immediate background
+  `git fetch`, which executes the *target repository's own* configuration.
+  `remote.<name>.url = ext::sh -c '…'`, `core.sshCommand`, `core.gitProxy` and
+  `credential.helper` are all command-execution vectors, so navigation alone was
+  enough to run code chosen by the browsed tree. Git's `safe.directory` guard does
+  not cover this: it only rejects repositories owned by a *different* user, and an
+  unpacked archive or fresh clone is owned by you.
+
+  Auto-fetch is now off by default and opt-in per config:
+
+  ```yaml
+  git:
+    auto_fetch: true   # only for trees you control
+  ```
+
+  Local git status colors and the branch indicator are unaffected — they never
+  needed the network. Manual pull (`Ctrl+G`) is unchanged.
+
+- **[FIX] All git invocations are hardened against repository-supplied config.**
+  Every `git` call now pins `core.fsmonitor=false`, `core.sshCommand=ssh`,
+  `core.gitProxy=`, `core.pager=cat`, `credential.helper=` and
+  `protocol.ext.allow=never` on the command line, where repo config cannot
+  override them, plus `GIT_TERMINAL_PROMPT=0` / `GIT_ASKPASS=` / `GIT_PAGER=cat`
+  to keep git non-interactive. Verified against a repository configured to run a
+  `core.fsmonitor` helper on `git status` and an `ext::sh -c` remote: both execute
+  without the flags and are blocked with them.
+
+  This shrinks the surface but does not close it — `.gitattributes` plus a
+  `filter.<name>.clean` entry can still run a command during `git status`, and git
+  offers no single switch to disable all filters. That residual risk is why
+  `git.auto_fetch` defaults to off rather than relying on hardening alone.
+
+### Changed
+
+- **[CHG] Dependency advisories are now triaged in-repo.** `.cargo/audit.toml` and
+  the `[advisories] ignore` list in `deny.toml` document two `quick-xml` DoS
+  advisories (RUSTSEC-2026-0194 / -0195) as unreachable, with the dependency paths
+  that make them so: typst's CSL bibliography parser, which never sees user input
+  because the Typst source is generated internally, and the build-time
+  `wayland-scanner` proc-macro. Neither is resolvable via `cargo update`
+  (`citationberg` pins `^0.38`, `wayland-scanner` pins `^0.39`). Re-verify with
+  `cargo tree -i quick-xml` whenever the lockfile changes.
+- **[CHG] `timeout-minutes` added to the `audit` and `deny` CI jobs**, the two that
+  were missed in the v1.9.1 sweep.
+- New dependency: `sha2` 0.10, used only for content-pinning the config trust
+  allowlist.
+
+### Fixed
+
+- **[FIX] The SSH image-paste setup instructions no longer assume a macOS client.**
+  Wizard step "SSH Image Paste", `--ssh-paste-diag` and the USAGE.md sections told
+  every user to run `brew install shunmeicho/tap/cc-clip` "on your Mac". The wizard
+  runs on the *remote* host and cannot know the client's OS, so Linux users were
+  handed a command that does not exist for them. The instructions now say "on your
+  local machine" and list both installs (`brew` for macOS, `cargo install cc-clip`
+  for Linux). Text only — no behavior change; the helper detection, the port-9998
+  reachability check and the `[m] mark as configured` flag are untouched.
+- **[FIX] The remote export/preview transfer no longer calls the SSH client a Mac
+  either.** The iTerm2 OSC 1337 file transfer works from any host running iTerm2
+  or WezTerm — WezTerm ships for Linux — but the footer flash, `--open-diag`
+  output and USAGE.md all said "your Mac". Now "your local machine" / "local
+  `~/Downloads`". Text only.
+
 ## Version 1.9.4 (28.07.2026)
 
 ### Added

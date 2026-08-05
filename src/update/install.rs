@@ -249,7 +249,11 @@ fn filter_restart_args(args: impl Iterator<Item = String>) -> Vec<String> {
             continue;
         }
         match arg.as_str() {
-            "--update-to" | "--check-update" | "--clipboard-diag" | "--ssh-paste-diag" => {
+            "--update-to"
+            | "--check-update"
+            | "--clipboard-diag"
+            | "--ssh-paste-diag"
+            | "--trust-local-config" => {
                 // --update-to takes a value argument; skip it too
                 if arg == "--update-to" {
                     skip_next = true;

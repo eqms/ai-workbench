@@ -1,3 +1,7 @@
 /target
 .DS_Store
 temp/
+
+# Repo-local runtime config. Machine-specific (shell paths, export dirs) and,
+# since v1.10.0, a trust-gated file that must never be shipped in the repo.
+/config.yaml

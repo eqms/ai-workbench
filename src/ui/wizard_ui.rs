@@ -575,11 +575,11 @@ fn render_complete(frame: &mut Frame, area: Rect) {
 
 fn render_ssh_image_paste(frame: &mut Frame, area: Rect, state: &WizardState) {
     let chunks = Layout::vertical([
-        Constraint::Length(3), // header
-        Constraint::Length(2), // banner
-        Constraint::Length(3), // detection result
-        Constraint::Length(8), // setup instructions
-        Constraint::Length(3), // mark configured hint
+        Constraint::Length(3),  // header
+        Constraint::Length(2),  // banner
+        Constraint::Length(3),  // detection result
+        Constraint::Length(10), // setup instructions
+        Constraint::Length(3),  // mark configured hint
         Constraint::Min(0),
     ])
     .split(area);
@@ -627,17 +627,19 @@ fn render_ssh_image_paste(frame: &mut Frame, area: Rect, state: &WizardState) {
     .wrap(Wrap { trim: true });
     frame.render_widget(detection, chunks[2]);
 
-    // Setup instructions (Mac side + remote side)
+    // Setup instructions (local client side + remote side)
     let instructions = Paragraph::new(vec![
         Line::from(Span::styled(
             "Setup (one-time):",
             Style::default().add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from("  1. On your Mac:    brew install shunmeicho/tap/cc-clip"),
-        Line::from("  2. On your Mac:    start the daemon (cc-clip-daemon &)"),
-        Line::from("  3. ~/.ssh/config:  add `RemoteForward 9998 localhost:9998` for this host"),
-        Line::from("  4. On this host:   cargo install cc-clip"),
+        Line::from("  1. On your local machine:  install cc-clip"),
+        Line::from("       macOS:  brew install shunmeicho/tap/cc-clip"),
+        Line::from("       Linux:  cargo install cc-clip"),
+        Line::from("  2. On your local machine:  start the daemon (cc-clip-daemon &)"),
+        Line::from("  3. ~/.ssh/config:          add `RemoteForward 9998 localhost:9998`"),
+        Line::from("  4. On this host:           cargo install cc-clip"),
         Line::from(""),
         Line::from(Span::styled(
             "Re-run --ssh-paste-diag to verify.",

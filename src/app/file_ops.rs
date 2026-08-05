@@ -668,7 +668,7 @@ impl App {
     ///
     /// On a local session this opens the file as before. Over SSH it routes
     /// through `remote_open::open_or_transfer`, which streams the file to the
-    /// user's Mac terminal (iTerm2/WezTerm) or, on terminals without transfer
+    /// user's local terminal (iTerm2/WezTerm) or, on terminals without transfer
     /// support, keeps it on disk and reports the path.
     pub(crate) fn open_in_browser(&mut self, path: &std::path::Path) {
         use crate::browser::{self, remote_open};
@@ -746,7 +746,7 @@ impl App {
             OpenOutcome::OpenedLocally => {}
             OpenOutcome::Transferred => {
                 self.copy_flash_message =
-                    Some("\u{2197} Transferred to your Mac (~/Downloads)".to_string());
+                    Some("\u{2197} Transferred to local ~/Downloads".to_string());
                 self.copy_flash_lines = 0;
                 self.last_copy_time = Some(std::time::Instant::now());
             }

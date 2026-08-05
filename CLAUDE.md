@@ -133,9 +133,25 @@ Mouse events compute which pane was clicked using helper closure `is_inside(rect
 ### Config Files
 
 The application loads configuration from:
-1. `./config.yaml` (local directory, highest priority)
+1. `./config.yaml` (local directory, highest priority) — **only when approved**, see below
 2. `~/.config/ai-workbench/config.yaml` (user config)
 3. Built-in defaults (fallback)
+
+**Repo-local config requires explicit approval.** `config.yaml` sets
+`pty.*_command` and `terminal.shell_path`, which are spawned as processes at
+startup, so loading whatever file happens to sit in the working directory would
+make "start the tool in a cloned repo" equivalent to running its code. A local
+config is ignored until approved once:
+
+```bash
+ai-workbench --trust-local-config
+```
+
+The approval pins the canonical path plus a SHA-256 of the content in
+`~/.config/ai-workbench/trusted_configs.yaml` (mode 0600); any later edit
+invalidates it. Startup prints a stderr warning when a local config is skipped.
+The trust decision lives in `config.rs` — `local_config_status()` for the I/O
+wrapper, `classify_local_config()` for the pure, testable core.
 
 ### Config Structure (`config.yaml`)
 ```yaml
@@ -145,7 +161,24 @@ terminal:
 
 ui:
   theme: "default"
+
+git:
+  # Run `git fetch` when the file browser enters a repository.
+  # Off by default: fetch executes the target repo's own config
+  # (`remote.<n>.url = ext::…`, `core.sshCommand`, `credential.helper`),
+  # so auto-fetch would let any browsed directory run code.
+  auto_fetch: false
 ```
+
+### Git Subprocess Hardening
+
+All `git` invocations go through `git_command()` in `src/git/mod.rs`, which pins
+`core.fsmonitor`, `core.sshCommand`, `core.gitProxy`, `core.pager`,
+`credential.helper` and `protocol.ext.allow` on the command line so repository
+config cannot override them. Add new git calls through this helper, never via a
+bare `Command::new("git")`. Note the surface is reduced, not closed:
+`.gitattributes` + `filter.<name>.clean` can still execute during `git status`,
+which is why `git.auto_fetch` defaults to off.
 
 ### Session State
 
