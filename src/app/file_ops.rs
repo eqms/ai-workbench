@@ -162,8 +162,31 @@ impl App {
                     }
                 }
             }
+            MenuAction::GitPull => self.request_manual_pull(),
             MenuAction::None => {}
         }
+    }
+
+    /// Offer a `git pull` for the repository the file browser is in.
+    ///
+    /// Deliberately independent of `git.auto_fetch`: that setting governs
+    /// whether merely *navigating* into a repository talks to the network, not
+    /// whether the user may ask for it. `git pull` fetches on its own, so no
+    /// separate remote check is needed.
+    fn request_manual_pull(&mut self) {
+        let Some(repo_root) = crate::git::find_repo_root(&self.file_browser.current_dir) else {
+            self.copy_flash_message = Some("⚠ Not a git repository".to_string());
+            self.copy_flash_lines = 0;
+            self.last_copy_time = Some(std::time::Instant::now());
+            return;
+        };
+        let branch =
+            crate::git::get_current_branch(&repo_root).unwrap_or_else(|| "HEAD".to_string());
+        self.dialog.dialog_type = ui::dialog::DialogType::Confirm {
+            title: "Git Pull".to_string(),
+            message: format!("Pull '{}' from its remote?", branch),
+            action: ui::dialog::DialogAction::GitPull { repo_root },
+        };
     }
 
     /// Check if a filename is safe (no path traversal).

@@ -21,7 +21,13 @@ pub enum MenuAction {
     GoToPath,
     AddToGitignore,
     ExportFile,
+    GitPull,
 }
+
+/// Number of selectable entries. Kept next to the `action()` mapping and the
+/// `items` list in `render` — all three must agree, and a mismatch here silently
+/// makes the last entry unreachable.
+const ITEM_COUNT: usize = 13;
 
 #[derive(Default)]
 pub struct MenuBar {
@@ -36,12 +42,12 @@ impl MenuBar {
     }
 
     pub fn next(&mut self) {
-        self.selected = (self.selected + 1) % 12;
+        self.selected = (self.selected + 1) % ITEM_COUNT;
     }
 
     pub fn prev(&mut self) {
         if self.selected == 0 {
-            self.selected = 11;
+            self.selected = ITEM_COUNT - 1;
         } else {
             self.selected -= 1;
         }
@@ -61,6 +67,7 @@ impl MenuBar {
             9 => MenuAction::GoToPath,
             10 => MenuAction::AddToGitignore,
             11 => MenuAction::ExportFile,
+            12 => MenuAction::GitPull,
             _ => MenuAction::None,
         }
     }
@@ -84,7 +91,9 @@ pub fn render(f: &mut Frame, area: Rect, menu: &MenuBar) {
         ("g", "Go to Path"),
         ("i", "Add to .gitignore"),
         ("x", "Export Markdown/PDF"),
+        ("p", "Git Pull"),
     ];
+    debug_assert_eq!(items.len(), ITEM_COUNT, "menu items and ITEM_COUNT drifted");
 
     // Menu popup in center-top
     let width = 40u16;
@@ -124,5 +133,37 @@ pub fn render(f: &mut Frame, area: Rect, menu: &MenuBar) {
             Paragraph::new(line).style(Style::default().bg(Color::DarkGray)),
             item_area,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `next`/`prev` wrap over `ITEM_COUNT`, so every index must map to a real
+    /// action — an off-by-one here makes the last entry silently unreachable.
+    #[test]
+    fn every_index_maps_to_an_action() {
+        for i in 0..ITEM_COUNT {
+            let menu = MenuBar {
+                visible: true,
+                selected: i,
+            };
+            assert_ne!(menu.action(), MenuAction::None, "index {i} has no action");
+        }
+    }
+
+    #[test]
+    fn wrapping_covers_the_full_list() {
+        let mut menu = MenuBar {
+            visible: true,
+            selected: 0,
+        };
+        menu.prev();
+        assert_eq!(menu.selected, ITEM_COUNT - 1);
+        assert_eq!(menu.action(), MenuAction::GitPull);
+        menu.next();
+        assert_eq!(menu.selected, 0);
+        assert_eq!(menu.action(), MenuAction::NewFile);
     }
 }

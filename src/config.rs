@@ -42,7 +42,9 @@ pub struct GitConfig {
     /// owned by a *different* user, and an unpacked archive or a fresh clone is
     /// owned by you.
     ///
-    /// Enable only for trees you control. Manual pull (`Ctrl+G`) is unaffected.
+    /// Enable only for trees you control. Pulling by hand is unaffected: the
+    /// file menu (F9 → `p`) checks the remote and offers a pull regardless of
+    /// this setting, and the LazyGit pane (F5) is untouched either way.
     #[serde(default)]
     pub auto_fetch: bool,
 }
@@ -919,18 +921,32 @@ fn save_trusted_configs(entries: &[TrustedConfig]) -> Result<()> {
 /// approving a config approves that exact content — a later edit (or a
 /// `git pull` that rewrites it) drops back to [`LocalConfigStatus::Changed`].
 pub fn local_config_status() -> LocalConfigStatus {
+    read_and_classify_local_config().0
+}
+
+/// Read `./config.yaml` **once** and classify those exact bytes.
+///
+/// Callers that go on to parse the file must use the returned bytes rather than
+/// reading again: a second read is a different file. Between "hash matches the
+/// approval" and "parse what is on disk" the content can change, and only the
+/// first version was ever approved.
+fn read_and_classify_local_config() -> (LocalConfigStatus, Option<Vec<u8>>) {
     let local = Path::new(LOCAL_CONFIG_NAME);
     let Ok(contents) = fs::read(local) else {
-        return LocalConfigStatus::Absent;
+        return (LocalConfigStatus::Absent, None);
     };
+    // The file is readable but we cannot resolve its identity, so it cannot be
+    // matched against the allowlist. Fail closed *and* keep it reportable —
+    // `Absent` would silently drop the "your config is being ignored" warning.
     let Ok(canonical) = local.canonicalize() else {
-        return LocalConfigStatus::Absent;
+        return (LocalConfigStatus::Untrusted, Some(contents));
     };
-    classify_local_config(
+    let status = classify_local_config(
         &canonical.to_string_lossy(),
         &contents,
         &load_trusted_configs(),
-    )
+    );
+    (status, Some(contents))
 }
 
 /// Pure classification core of [`local_config_status`], split out so the trust
@@ -952,18 +968,26 @@ fn classify_local_config(
 /// Approve the current directory's `./config.yaml` (the `--trust-local-config`
 /// CLI action). Returns the canonical path that was recorded.
 pub fn trust_local_config() -> Result<std::path::PathBuf> {
-    let local = Path::new(LOCAL_CONFIG_NAME);
-    let contents = fs::read(local)
+    let contents = fs::read(Path::new(LOCAL_CONFIG_NAME))
         .map_err(|e| anyhow::anyhow!("Cannot read ./{}: {}", LOCAL_CONFIG_NAME, e))?;
+    pin_local_config(&contents)
+}
 
+/// Record `contents` as the approved version of `./config.yaml`.
+///
+/// Takes the bytes rather than reading the file so a caller that just wrote it
+/// pins exactly what it wrote — re-reading here would re-open the same
+/// check-then-use gap the trust check itself closes.
+fn pin_local_config(contents: &[u8]) -> Result<std::path::PathBuf> {
     // Parse before approving: an unparseable file would be silently skipped at
     // startup anyway, and approving it would only hide the real problem.
-    serde_yaml_ng::from_str::<Config>(&String::from_utf8_lossy(&contents))
+    // `from_utf8_lossy` mirrors how `load_config_checked` reads it back.
+    serde_yaml_ng::from_str::<Config>(&String::from_utf8_lossy(contents))
         .map_err(|e| anyhow::anyhow!("./{} is not a valid config: {}", LOCAL_CONFIG_NAME, e))?;
 
-    let canonical = local.canonicalize()?;
+    let canonical = Path::new(LOCAL_CONFIG_NAME).canonicalize()?;
     let key = canonical.to_string_lossy().to_string();
-    let sha256 = sha256_hex(&contents);
+    let sha256 = sha256_hex(contents);
 
     let mut entries = load_trusted_configs();
     entries.retain(|e| e.path != key);
@@ -979,12 +1003,15 @@ pub fn load_config() -> Result<Config> {
 /// Like [`load_config`], but also reports what happened to `./config.yaml`
 /// so the caller can surface a warning.
 pub fn load_config_checked() -> Result<(Config, LocalConfigStatus)> {
-    let status = local_config_status();
+    let (status, local_contents) = read_and_classify_local_config();
 
-    // 1. Repository-local config.yaml — only when explicitly approved.
+    // 1. Repository-local config.yaml — only when explicitly approved. Parse the
+    //    bytes that were hashed, never a fresh read of the file.
     if status == LocalConfigStatus::Trusted {
-        let contents = fs::read_to_string(LOCAL_CONFIG_NAME)?;
-        return Ok((serde_yaml_ng::from_str(&contents)?, status));
+        if let Some(contents) = local_contents {
+            let parsed = serde_yaml_ng::from_str(&String::from_utf8_lossy(&contents))?;
+            return Ok((parsed, status));
+        }
     }
 
     // 2. Check ~/.config/ai-workbench/config.yaml (XDG-style)
@@ -1028,8 +1055,8 @@ pub fn save_config(config: &Config) -> Result<()> {
         set_restrictive_permissions(local_config)?;
         // Re-pin the allowlist to the content we just wrote — otherwise our own
         // save would invalidate the approval and the file would be ignored on
-        // the next start.
-        trust_local_config()?;
+        // the next start. Pin the bytes we wrote, not a re-read of the file.
+        pin_local_config(yaml.as_bytes())?;
         return Ok(());
     }
 

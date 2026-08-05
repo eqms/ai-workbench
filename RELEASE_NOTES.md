@@ -1,5 +1,54 @@
 # Release Notes
 
+## Version 1.10.1 (05.08.2026)
+
+Follow-up review of the v1.10.0 security work. One functional regression, one
+gap in the git hardening, and three parsing/robustness defects.
+
+### Fixed
+
+- **[FIX] Pulling is possible again.** v1.10.0 turned `git.auto_fetch` off by
+  default, which also removed the only path to `git pull`: the pull dialog was
+  raised solely by the automatic remote check, so with the new default nothing
+  could reach it. The `GitConfig::auto_fetch` doc claimed "Manual pull (`Ctrl+G`)
+  is unaffected", but no such binding exists — `g` in the file menu is "Go to
+  path". There is now a real entry: **F9 → `p`**, which asks before pulling and
+  works regardless of `auto_fetch` (that setting governs whether *navigating*
+  into a repository talks to the network, not whether you may ask it to).
+- **[FIX] `git pull` no longer runs the repository's hooks.** `git_command()`
+  pinned six config keys but not `core.hooksPath`, so confirming the pull dialog
+  in a tree you had only navigated into executed `.git/hooks/post-merge`. Clones
+  do not carry hooks, but an unpacked archive containing `.git/` does. Now
+  pointed at a path that is never a directory, verified against a real
+  `post-merge` hook. Hooks are disabled for *our* git calls only — the Terminal
+  and LazyGit panes run git unpinned.
+- **[FIX] The trust check and the config load no longer read the file twice.**
+  `local_config_status()` hashed one read of `./config.yaml` and
+  `load_config_checked()` then parsed a second, so what was approved and what was
+  loaded could differ. New `read_and_classify_local_config()` reads once and
+  hands the bytes to the caller; `save_config()` likewise pins the bytes it just
+  wrote instead of re-reading them.
+- **[FIX] Paths with non-ASCII characters get their git color back.**
+  `core.quotePath` was left at its default, so `git status --porcelain` returned
+  `"\303\234bung.txt"` for `Übung.txt` — a path that never matches anything on
+  disk, leaving the file rendered as clean. Now pinned to `false`.
+- **[FIX] A localized git no longer turns a missing remote into an error.** The
+  "no remote configured" branch matches on English stderr (`Could not resolve`);
+  under a German locale it fell through to the error path. `git_command()` now
+  sets `LC_ALL=C`.
+- **[FIX] An unreadable-but-present `config.yaml` is reported.** When
+  `canonicalize()` failed, `local_config_status()` returned `Absent`, which
+  suppressed the "your config is being ignored" warning. It now returns
+  `Untrusted` — still fail-closed, but visible. Trusting and loading also agree
+  on UTF-8 handling now, so a file with invalid UTF-8 can no longer be approved
+  and then abort startup.
+
+### Changed
+
+- `MenuBar` indices are derived from a single `ITEM_COUNT` constant with a
+  `debug_assert` against the rendered list; the wrap-around bounds were
+  duplicated magic numbers. 4 new unit tests (263 total).
+
 ## Version 1.10.0 (29.07.2026)
 
 Security release. Two issues let a directory you merely *open* decide what code

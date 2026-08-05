@@ -282,6 +282,10 @@ impl App {
                 self.menu.visible = false;
                 self.handle_menu_action(ui::menu::MenuAction::AddToGitignore);
             }
+            KeyCode::Char('p') => {
+                self.menu.visible = false;
+                self.handle_menu_action(ui::menu::MenuAction::GitPull);
+            }
             KeyCode::Char('x') => {
                 self.menu.visible = false;
                 self.handle_menu_action(ui::menu::MenuAction::ExportFile);

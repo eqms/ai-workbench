@@ -243,6 +243,7 @@ The status bar shows file size, modification date, and git branch info.
 | Y | Copy relative path |
 | g | Go to path |
 | i | Add to .gitignore |
+| p | Git pull (asks first; works regardless of `git.auto_fetch`) |
 
 ### Browser Preview (o key)
 Open files in external applications:
@@ -651,6 +652,7 @@ Die Statusleiste zeigt Dateigröße, Änderungsdatum und Git-Branch-Info.
 | Y | Relativen Pfad kopieren |
 | g | Zu Pfad springen |
 | i | Zur .gitignore hinzufügen |
+| p | Git Pull (mit Rückfrage; unabhängig von `git.auto_fetch`) |
 
 ### Browser-Vorschau (o-Taste)
 Dateien in externen Anwendungen öffnen:

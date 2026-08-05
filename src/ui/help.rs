@@ -272,6 +272,10 @@ fn help_content() -> Vec<Line<'static>> {
             Span::raw("Add to .gitignore (via File Menu)"),
         ]),
         Line::from(vec![
+            Span::styled("  F9 → p       ", Style::default().fg(Color::Cyan)),
+            Span::raw("Git pull (via File Menu)"),
+        ]),
+        Line::from(vec![
             Span::styled("  F3           ", Style::default().fg(Color::Cyan)),
             Span::raw("Maximize/Restore Preview"),
         ]),

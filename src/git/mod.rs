@@ -25,12 +25,25 @@ use std::sync::mpsc;
 /// - `protocol.ext.allow` — `ext::sh -c '…'` remote URLs
 /// - `core.pager` / `GIT_TERMINAL_PROMPT` / `GIT_ASKPASS` — keep git
 ///   non-interactive so it never spawns a pager or prompt helper
+/// - `core.hooksPath` — `git pull` runs `post-merge` (and friends) from
+///   `.git/hooks/`. A `git clone` does not carry hooks, but an unpacked archive
+///   that includes `.git/` does, and confirming the "Pull now?" dialog in a tree
+///   you only navigated into would execute them. Pointed at a path that does not
+///   exist, so no hook is ever found.
+///
+/// `core.quotePath=false` and `LC_ALL=C` are not hardening — they make the
+/// output parseable: quoted paths (`"\303\234bung.txt"`) never match a real path,
+/// and localized stderr breaks the "no remote" classification below.
 ///
 /// This shrinks the surface but does not eliminate it: `.gitattributes` plus a
 /// `filter.<name>.clean` entry can still run a command during `git status`, and
 /// git offers no single switch to disable all filters. That residual risk is why
 /// [`crate::config::GitConfig::auto_fetch`] defaults to off — hardening is the
 /// second line of defense, not the first.
+///
+/// Note this disables hooks for *our* git calls only. The Terminal and LazyGit
+/// panes run git themselves, unpinned — a user who relies on `post-merge` hooks
+/// pulls there.
 fn git_command(repo: &Path) -> Command {
     let mut cmd = Command::new("git");
     cmd.args([
@@ -46,13 +59,24 @@ fn git_command(repo: &Path) -> Command {
         "credential.helper=",
         "-c",
         "protocol.ext.allow=never",
+        "-c",
+        NO_HOOKS_ARG,
+        "-c",
+        "core.quotePath=false",
     ])
     .current_dir(repo)
     .env("GIT_TERMINAL_PROMPT", "0")
     .env("GIT_ASKPASS", "")
-    .env("GIT_PAGER", "cat");
+    .env("GIT_PAGER", "cat")
+    // Force C messages so the stderr matching in `check_remote_changes_async`
+    // works under a localized environment.
+    .env("LC_ALL", "C");
     cmd
 }
+
+/// `core.hooksPath` pointed at a path that is never a directory, which makes git
+/// find no hooks at all. Relative, so it stays valid whatever repo we run in.
+const NO_HOOKS_ARG: &str = "core.hooksPath=.git/ai-workbench-hooks-disabled";
 
 /// Find the git repository root for a given path
 pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
@@ -300,6 +324,42 @@ mod tests {
         let result = find_repo_root(Path::new("."));
         // May or may not be in a git repo depending on where tests run
         assert!(result.is_some() || result.is_none());
+    }
+
+    /// Every `-c` override we rely on must actually reach the command line;
+    /// repo config wins over anything we only set in the environment.
+    #[test]
+    fn git_command_pins_execution_vectors() {
+        let cmd = git_command(Path::new("."));
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+
+        for pinned in [
+            "core.fsmonitor=false",
+            "core.sshCommand=ssh",
+            "core.gitProxy=",
+            "credential.helper=",
+            "protocol.ext.allow=never",
+            NO_HOOKS_ARG,
+            "core.quotePath=false",
+        ] {
+            assert!(args.iter().any(|a| a == pinned), "missing -c {pinned}");
+        }
+    }
+
+    /// Localized stderr would break the "no remote configured" classification in
+    /// `check_remote_changes_async`.
+    #[test]
+    fn git_command_forces_c_locale() {
+        let cmd = git_command(Path::new("."));
+        let lc_all = cmd
+            .get_envs()
+            .find(|(k, _)| *k == std::ffi::OsStr::new("LC_ALL"))
+            .and_then(|(_, v)| v)
+            .map(|v| v.to_string_lossy().to_string());
+        assert_eq!(lc_all.as_deref(), Some("C"));
     }
 
     #[test]
