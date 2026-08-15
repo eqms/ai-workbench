@@ -124,6 +124,10 @@ pub struct App {
     pub drag_state: DragState,
     // Mouse-based text selection in terminal panes
     pub mouse_selection: MouseSelection,
+    // Pane that received a left-button press forwarded to its PTY. Drag and
+    // release events keep going there until the button comes up, even if the
+    // cursor leaves the pane.
+    pub pty_mouse_capture: Option<PaneId>,
     // Git remote change detection state
     pub git_remote: GitRemoteState,
     // Async job: git remote-ahead check
@@ -351,6 +355,7 @@ impl App {
             terminal_selection: TerminalSelection::default(),
             drag_state: DragState::default(),
             mouse_selection: MouseSelection::default(),
+            pty_mouse_capture: None,
             git_remote: GitRemoteState::default(),
             git_check_job: JobState::default(),
             update_state: UpdateState::new(),

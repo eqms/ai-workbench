@@ -2,7 +2,7 @@ use crossterm::event::{MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
 use crate::browser;
-use crate::terminal::WheelDirection;
+use crate::terminal::{mode_reports, MouseButtonEvent, WheelDirection};
 use crate::types::{ClaudePermissionMode, EditorMode, PaneId, ResizeBorder, ScrollbarAxis};
 use crate::ui;
 
@@ -67,8 +67,9 @@ pub(crate) fn scroll_files_pane(
 /// Convert absolute terminal coordinates to 1-based xterm mouse coordinates
 /// relative to the pane content area inside the 1-px border: the first
 /// content cell at `rect.x + 1` maps to column 1. Clamped to the content
-/// size so events on the border still produce valid coordinates.
-pub(crate) fn wheel_coords_in_pane(rect: Rect, x: u16, y: u16) -> (u16, u16) {
+/// size so events on the border — and a release that lands outside the pane
+/// after a drag — still produce valid coordinates.
+pub(crate) fn pane_cell_coords(rect: Rect, x: u16, y: u16) -> (u16, u16) {
     let max_col = rect.width.saturating_sub(2).max(1);
     let max_row = rect.height.saturating_sub(2).max(1);
     (
@@ -148,7 +149,7 @@ impl App {
 
         let (mode, encoding, alt_screen) = pty.mouse_report_state();
         if mode != vt100::MouseProtocolMode::None {
-            let (col, row) = wheel_coords_in_pane(rect, x, y);
+            let (col, row) = pane_cell_coords(rect, x, y);
             let _ = pty.send_mouse_wheel(wheel_dir, encoding, col, row, WHEEL_DELTA);
         } else if alt_screen {
             let _ = pty.send_arrow_keys(wheel_dir, WHEEL_DELTA);
@@ -157,6 +158,51 @@ impl App {
                 ScrollDirection::Down => pty.scroll_down(WHEEL_DELTA as usize),
                 ScrollDirection::Up => pty.scroll_up(WHEEL_DELTA as usize),
             }
+        }
+    }
+
+    /// Forward a left-button event to a PTY pane whose inner application has
+    /// mouse tracking enabled (same tmux-like routing as `handle_pty_scroll`).
+    /// Returns true when the event belongs to the inner app and must not be
+    /// handled locally — clicking a button inside Claude Code or lazygit is
+    /// then indistinguishable from clicking it in a bare terminal.
+    ///
+    /// Returns false when the app does not track the mouse, so the local
+    /// text selection keeps working in a plain shell pane.
+    fn forward_mouse_button(
+        &mut self,
+        pane_id: PaneId,
+        rect: Rect,
+        x: u16,
+        y: u16,
+        event: MouseButtonEvent,
+    ) -> bool {
+        let Some(pty) = self.terminals.get(&pane_id) else {
+            return false;
+        };
+        let (mode, encoding, _) = pty.mouse_report_state();
+        if mode == vt100::MouseProtocolMode::None {
+            return false;
+        }
+        // The app tracks the mouse but did not ask for this particular event
+        // (e.g. a release in X10 mode). Swallow it anyway — starting a local
+        // selection halfway through an interaction the app believes it owns
+        // would leave a frozen highlight behind.
+        if mode_reports(mode, event) {
+            let (col, row) = pane_cell_coords(rect, x, y);
+            let _ = pty.send_mouse_button(event, encoding, col, row);
+        }
+        true
+    }
+
+    /// Rect of a PTY pane, for routing drag/release to wherever the press
+    /// landed even after the cursor leaves that pane.
+    fn pty_pane_rect(&self, pane: PaneId, rects: &super::LayoutRects) -> Option<Rect> {
+        match pane {
+            PaneId::Claude => Some(rects.claude),
+            PaneId::LazyGit => Some(rects.lazygit),
+            PaneId::Terminal => Some(rects.terminal),
+            _ => None,
         }
     }
 
@@ -302,6 +348,8 @@ impl App {
 
         match mouse.kind {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                // A press elsewhere ends any capture whose release we missed.
+                self.pty_mouse_capture = None;
                 // XRDP-defensive: clear any stale selection from a prior
                 // interaction whose Up(Left) event may have been swallowed
                 // by the RDP transport. If the user clicks inside a pane,
@@ -641,18 +689,48 @@ impl App {
                     {
                         self.claude_startup
                             .open(self.config.claude.startup_prefixes.clone());
+                    } else if self.forward_mouse_button(
+                        PaneId::Claude,
+                        claude,
+                        x,
+                        y,
+                        MouseButtonEvent::Press,
+                    ) {
+                        // Inner app tracks the mouse: the click is its own
+                        // (e.g. Claude Code's "Jump to bottom" button), and so
+                        // is text selection — Claude Code marks text itself.
+                        self.pty_mouse_capture = Some(PaneId::Claude);
                     } else {
-                        // Normal click starts character-level mouse text selection
+                        // App without mouse tracking: start character-level
+                        // mouse text selection as before
                         self.mouse_selection.start(PaneId::Claude, x, y, claude);
                     }
                     self.active_pane = PaneId::Claude;
                 } else if is_inside(lazygit, x, y) {
-                    // Normal click starts character-level mouse text selection
-                    self.mouse_selection.start(PaneId::LazyGit, x, y, lazygit);
+                    if self.forward_mouse_button(
+                        PaneId::LazyGit,
+                        lazygit,
+                        x,
+                        y,
+                        MouseButtonEvent::Press,
+                    ) {
+                        self.pty_mouse_capture = Some(PaneId::LazyGit);
+                    } else {
+                        self.mouse_selection.start(PaneId::LazyGit, x, y, lazygit);
+                    }
                     self.active_pane = PaneId::LazyGit;
                 } else if is_inside(term, x, y) {
-                    // Normal click starts character-level mouse text selection
-                    self.mouse_selection.start(PaneId::Terminal, x, y, term);
+                    if self.forward_mouse_button(
+                        PaneId::Terminal,
+                        term,
+                        x,
+                        y,
+                        MouseButtonEvent::Press,
+                    ) {
+                        self.pty_mouse_capture = Some(PaneId::Terminal);
+                    } else {
+                        self.mouse_selection.start(PaneId::Terminal, x, y, term);
+                    }
                     self.active_pane = PaneId::Terminal;
                 } else if is_inside(footer_area, x, y) {
                     // Use context-aware button positions
@@ -973,6 +1051,11 @@ impl App {
                     self.mouse_selection.update(x, y);
                 } else if self.drag_state.dragging {
                     self.drag_state.update_position(x, y);
+                } else if let Some(pane) = self.pty_mouse_capture {
+                    // Drag belongs to the inner app that got the press
+                    if let Some(rect) = self.pty_pane_rect(pane, &rects) {
+                        self.forward_mouse_button(pane, rect, x, y, MouseButtonEvent::Drag);
+                    }
                 }
             }
             // Handle drag drop and mouse selection finish
@@ -1003,6 +1086,13 @@ impl App {
                     self.scrollbar_drag.dragging = false;
                     self.scrollbar_drag.pane = None;
                     self.scrollbar_drag.axis = ScrollbarAxis::default();
+                    return;
+                }
+                // Release the button inside the app that got the press
+                if let Some(pane) = self.pty_mouse_capture.take() {
+                    if let Some(rect) = self.pty_pane_rect(pane, &rects) {
+                        self.forward_mouse_button(pane, rect, x, y, MouseButtonEvent::Release);
+                    }
                     return;
                 }
                 // Handle mouse text selection finish - copy to clipboard
@@ -1208,7 +1298,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_selected_to_window, scroll_files_pane, wheel_coords_in_pane, Rect, ScrollDirection,
+        clamp_selected_to_window, pane_cell_coords, scroll_files_pane, Rect, ScrollDirection,
     };
 
     // --- scroll_files_pane — ScrollDown ---
@@ -1293,7 +1383,7 @@ mod tests {
         assert_eq!(got, 8, "selected inside window must not change: {got}");
     }
 
-    // --- wheel_coords_in_pane ---
+    // --- pane_cell_coords ---
 
     #[test]
     fn wheel_coords_corners_clamped_to_content_area() {
@@ -1304,11 +1394,11 @@ mod tests {
             height: 20,
         };
         // Top-left border cell clamps up to the first content cell (1, 1)
-        assert_eq!(wheel_coords_in_pane(rect, 5, 3), (1, 1));
+        assert_eq!(pane_cell_coords(rect, 5, 3), (1, 1));
         // First content cell maps to (1, 1)
-        assert_eq!(wheel_coords_in_pane(rect, 6, 4), (1, 1));
+        assert_eq!(pane_cell_coords(rect, 6, 4), (1, 1));
         // Bottom-right border cell clamps to (width-2, height-2)
-        assert_eq!(wheel_coords_in_pane(rect, 44, 22), (38, 18));
+        assert_eq!(pane_cell_coords(rect, 44, 22), (38, 18));
     }
 
     #[test]
@@ -1319,6 +1409,6 @@ mod tests {
             width: 1,
             height: 1,
         };
-        assert_eq!(wheel_coords_in_pane(tiny, 0, 0), (1, 1));
+        assert_eq!(pane_cell_coords(tiny, 0, 0), (1, 1));
     }
 }

@@ -69,6 +69,69 @@ pub enum WheelDirection {
     Down,
 }
 
+/// Phase of a left-button mouse interaction forwarded to the PTY.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButtonEvent {
+    Press,
+    /// Motion while the button is held down.
+    Drag,
+    Release,
+}
+
+/// Whether an application that requested `mode` wants to hear about `event`.
+/// X10 (`Press`, DECSET 9) only ever reports presses; motion requires
+/// 1002/1003. Sending a report the app never asked for would desynchronize
+/// its own button-state tracking.
+pub(crate) fn mode_reports(mode: vt100::MouseProtocolMode, event: MouseButtonEvent) -> bool {
+    use vt100::MouseProtocolMode as Mode;
+    match event {
+        MouseButtonEvent::Press => mode != Mode::None,
+        MouseButtonEvent::Release => {
+            matches!(
+                mode,
+                Mode::PressRelease | Mode::ButtonMotion | Mode::AnyMotion
+            )
+        }
+        MouseButtonEvent::Drag => matches!(mode, Mode::ButtonMotion | Mode::AnyMotion),
+    }
+}
+
+/// Encode a left-button event in the requested xterm mouse protocol encoding.
+/// SGR distinguishes press from release by the final byte (`M` vs `m`) and
+/// keeps button 0; the legacy X10 encoding has no release button and reports
+/// 3 instead. Motion sets the 32 bit in both encodings.
+pub(crate) fn encode_mouse_button_event(
+    event: MouseButtonEvent,
+    encoding: vt100::MouseProtocolEncoding,
+    col: u16,
+    row: u16,
+) -> Vec<u8> {
+    match encoding {
+        vt100::MouseProtocolEncoding::Sgr => {
+            let btn: u8 = match event {
+                MouseButtonEvent::Press | MouseButtonEvent::Release => 0,
+                MouseButtonEvent::Drag => 32,
+            };
+            let final_byte = if event == MouseButtonEvent::Release {
+                'm'
+            } else {
+                'M'
+            };
+            format!("\x1b[<{btn};{col};{row}{final_byte}").into_bytes()
+        }
+        _ => {
+            let btn: u8 = match event {
+                MouseButtonEvent::Press => 0,
+                MouseButtonEvent::Release => 3,
+                MouseButtonEvent::Drag => 32,
+            };
+            let cx = (32u16 + col).min(255) as u8;
+            let cy = (32u16 + row).min(255) as u8;
+            vec![0x1b, b'[', b'M', 32 + btn, cx, cy]
+        }
+    }
+}
+
 /// Encode a wheel event in the requested xterm mouse protocol encoding.
 /// SGR: `ESC [ < btn ; col ; row M`. Otherwise X10: `ESC [ M` + three bytes
 /// offset by 32. Utf8 encoding is treated like X10 with saturation — Claude
@@ -283,6 +346,24 @@ impl PseudoTerminal {
         count: u8,
     ) -> Result<()> {
         let bytes = encode_wheel_event(direction, encoding, col, row, count);
+        let mut writer = lock_or_recover(&self.writer);
+        writer.write_all(&bytes)?;
+        writer.flush()?;
+        Ok(())
+    }
+
+    /// Forward a left-button press/drag/release to the inner application.
+    /// Same writer-only path as `send_mouse_wheel` — must not reset the
+    /// scrollback position. `col`/`row` are 1-based coordinates relative to
+    /// the pane content area.
+    pub fn send_mouse_button(
+        &self,
+        event: MouseButtonEvent,
+        encoding: vt100::MouseProtocolEncoding,
+        col: u16,
+        row: u16,
+    ) -> Result<()> {
+        let bytes = encode_mouse_button_event(event, encoding, col, row);
         let mut writer = lock_or_recover(&self.writer);
         writer.write_all(&bytes)?;
         writer.flush()?;
@@ -609,6 +690,72 @@ mod tests {
         );
         // 32+64=0x60 button, 32+3=0x23 col, 32+2=0x22 row
         assert_eq!(bytes, vec![0x1b, b'[', b'M', 0x60, 0x23, 0x22]);
+    }
+
+    #[test]
+    fn encode_sgr_left_press_and_release() {
+        let press = encode_mouse_button_event(
+            MouseButtonEvent::Press,
+            vt100::MouseProtocolEncoding::Sgr,
+            12,
+            34,
+        );
+        assert_eq!(press, b"\x1b[<0;12;34M".to_vec());
+        let release = encode_mouse_button_event(
+            MouseButtonEvent::Release,
+            vt100::MouseProtocolEncoding::Sgr,
+            12,
+            34,
+        );
+        assert_eq!(release, b"\x1b[<0;12;34m".to_vec());
+    }
+
+    #[test]
+    fn encode_sgr_left_drag_sets_motion_bit() {
+        let bytes = encode_mouse_button_event(
+            MouseButtonEvent::Drag,
+            vt100::MouseProtocolEncoding::Sgr,
+            2,
+            3,
+        );
+        assert_eq!(bytes, b"\x1b[<32;2;3M".to_vec());
+    }
+
+    #[test]
+    fn encode_x10_left_press_and_release() {
+        let press = encode_mouse_button_event(
+            MouseButtonEvent::Press,
+            vt100::MouseProtocolEncoding::Default,
+            3,
+            2,
+        );
+        // 32+0=0x20 button, 32+3=0x23 col, 32+2=0x22 row
+        assert_eq!(press, vec![0x1b, b'[', b'M', 0x20, 0x23, 0x22]);
+        let release = encode_mouse_button_event(
+            MouseButtonEvent::Release,
+            vt100::MouseProtocolEncoding::Default,
+            3,
+            2,
+        );
+        // X10 has no release button number: 32+3=0x23
+        assert_eq!(release, vec![0x1b, b'[', b'M', 0x23, 0x23, 0x22]);
+    }
+
+    #[test]
+    fn mode_reports_matches_protocol_capabilities() {
+        use vt100::MouseProtocolMode as Mode;
+        // Tracking off: nothing is forwarded.
+        assert!(!mode_reports(Mode::None, MouseButtonEvent::Press));
+        // X10: press only.
+        assert!(mode_reports(Mode::Press, MouseButtonEvent::Press));
+        assert!(!mode_reports(Mode::Press, MouseButtonEvent::Release));
+        assert!(!mode_reports(Mode::Press, MouseButtonEvent::Drag));
+        // VT200: press and release, but no motion.
+        assert!(mode_reports(Mode::PressRelease, MouseButtonEvent::Release));
+        assert!(!mode_reports(Mode::PressRelease, MouseButtonEvent::Drag));
+        // 1002/1003 want motion too — this is what Claude Code requests.
+        assert!(mode_reports(Mode::ButtonMotion, MouseButtonEvent::Drag));
+        assert!(mode_reports(Mode::AnyMotion, MouseButtonEvent::Drag));
     }
 
     #[test]

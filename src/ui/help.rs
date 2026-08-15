@@ -698,13 +698,23 @@ fn help_content() -> Vec<Line<'static>> {
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from("  Click and drag in Terminal or Preview panes"),
-        Line::from("  to select text character-by-character."),
+        Line::from("  Click and drag in the Preview pane, or in a terminal"),
+        Line::from("  pane running a plain shell, to select text"),
+        Line::from("  character-by-character."),
         Line::from(""),
         Line::from(vec![
             Span::styled("  Release      ", Style::default().fg(Color::Green)),
             Span::raw("Copy selection to System Clipboard"),
         ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  In Claude Code and lazygit the mouse belongs to the",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "  application itself — it handles clicks and marking.",
+            Style::default().fg(Color::DarkGray),
+        )),
         Line::from(""),
         Line::from(Span::styled(
             "  Selection is constrained to pane boundaries.",

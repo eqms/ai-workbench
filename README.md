@@ -83,6 +83,7 @@ ai-workbench ollama-pi         # Pi via Ollama launch
 **Highlights:**
 - Full PTY emulation with 256-color support and 1000-line scrollback
 - Search & Replace (MC Edit style) with regex support
+- **Clickable inner apps** - the mouse reaches Claude Code and lazygit (buttons, panels, "Jump to bottom")
 - **Character-level mouse selection** - click and drag to select text, auto-copies to clipboard
 - Keyboard selection mode (Ctrl+S) with intelligent filtering
 - Drag & Drop files into terminals

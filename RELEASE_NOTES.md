@@ -1,5 +1,46 @@
 # Release Notes
 
+## Version 1.11.0 (15.08.2026)
+
+Mouse clicks now reach the application running inside a pane.
+
+### Fixed
+
+- **[FIX] Clicks reach Claude Code and lazygit.** Claude Code's "Jump to bottom
+  (click)" button did nothing in the workbench — and so did every other
+  clickable element in Claude Code and lazygit. v0.96.0 taught the workbench to
+  forward the mouse *wheel* to an inner application that enables mouse tracking,
+  but buttons were never forwarded: a left click was consumed locally for focus
+  and text selection, so the `ESC [ <0;col;row M` report the application waits
+  for was never sent. Press, drag and release are now routed the same way the
+  wheel already was — if the inner application requested mouse tracking
+  (DECSET 1000/1002/1003), the event goes to it; otherwise nothing changes and
+  the local selection keeps working as before. The press captures the pane, so
+  a drag that leaves the pane still reports to the application that received it,
+  and the protocol mode is respected (no release reports to an X10-mode app, no
+  motion reports without 1002/1003).
+
+### Changed
+
+- **[CHG] In mouse-aware panes the mouse belongs to the application.** Where an
+  inner application tracks the mouse, the workbench no longer starts its own
+  text selection — Claude Code marks text itself, and that selection was what
+  the workbench had been overriding all along. Panes without mouse tracking —
+  a plain shell, the preview pane — are untouched: click and drag still selects
+  and copies to the clipboard exactly as before.
+
+### Internal
+
+- `encode_mouse_button_event()` and `mode_reports()` in `src/terminal.rs`
+  (pure, unit-tested) next to the existing `encode_wheel_event()`;
+  `PseudoTerminal::send_mouse_button()` writes them past `write_input()` so the
+  scrollback position survives, as `send_mouse_wheel()` already did.
+- `App::forward_mouse_button()` / `App::pty_pane_rect()` in `src/app/mouse.rs`,
+  new `App::pty_mouse_capture: Option<PaneId>` field.
+- `wheel_coords_in_pane()` renamed to `pane_cell_coords()` — it now serves
+  buttons as well as the wheel.
+- 267 unit + 3 CLI tests pass (+4).
+
 ## Version 1.10.1 (05.08.2026)
 
 Follow-up review of the v1.10.0 security work. One functional regression, one

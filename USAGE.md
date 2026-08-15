@@ -274,6 +274,13 @@ Open files in external applications:
 
 **Note:** Mouse selection is character-level (not line-based like keyboard selection).
 
+**When the pane runs a mouse-aware application** (Claude Code, lazygit, or anything
+else that enables mouse tracking), the mouse belongs to that application — this is
+what makes Claude Code's "Jump to bottom (click)" button and lazygit's panels
+clickable, and Claude Code marks text itself. In panes without mouse tracking —
+a plain shell, the preview pane — nothing changes: click and drag still selects
+text in the workbench.
+
 #### Intelligent Filtering
 When copying to Claude, output is automatically filtered:
 - Shell prompts removed (user@host$, >, >>>, etc.)
@@ -682,6 +689,13 @@ Dateien in externen Anwendungen öffnen:
 4. Gelbe Hervorhebung zeigt ausgewählte Zeichen
 
 **Hinweis:** Maus-Auswahl ist zeichenweise (nicht zeilenbasiert wie Tastatur-Auswahl).
+
+**Wenn im Bereich eine maus-fähige Anwendung läuft** (Claude Code, lazygit oder jede
+andere Anwendung mit aktivem Mouse-Tracking), gehört die Maus dieser Anwendung —
+genau dadurch funktionieren Claude Codes Schaltfläche „Jump to bottom (click)“ und
+die Panels von lazygit; Claude Code markiert Text selbst. In Bereichen ohne
+Mouse-Tracking — reine Shell, Vorschau-Bereich — ändert sich nichts: Klicken und
+Ziehen markiert dort weiterhin Text in der Workbench.
 
 #### Intelligentes Filtering
 Beim Kopieren zu Claude wird die Ausgabe automatisch gefiltert:
