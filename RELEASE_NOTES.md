@@ -29,8 +29,34 @@ Mouse clicks now reach the application running inside a pane.
   a plain shell, the preview pane — are untouched: click and drag still selects
   and copies to the clipboard exactly as before.
 
+### Security
+
+- **[ADD] Self-update now verifies release signatures (SEC-01 Half 2 — finding
+  closed).** Archives have been signed in CI since v1.6.0, but the client
+  installed whatever GitHub served: a compromised release asset would have
+  installed itself on every machine at the next auto-update.
+  `src/update/install.rs` now embeds `signing/ai-workbench-pub.bin` as
+  `RELEASE_PUBLIC_KEY` and passes it to both `Update::configure()` chains, so
+  `self_update` rejects any archive that is unsigned or signed with another
+  key. The published v1.10.1 asset was verified against the committed key
+  before enabling this, confirming binary and CI use the same key. Two
+  consequences: signing is now **mandatory** in the release workflow (missing
+  `ZIPSIGN_PRIVATE_KEY` fails the job instead of publishing an uninstallable
+  release), and `--update-to` targets must be **v1.6.0 or newer**, since
+  earlier releases predate signing.
+- **[FIX] `SECURITY-NOTES.md` no longer reports two fixed issues as open.**
+  "Shell Fallback in Dependency Probe" and "Predictable Temp File Path" were
+  still listed as `(MEDIUM — open)` although both were closed in v0.90.0 —
+  the shell fallback is gone from `dependency_checker.rs`, and
+  `pdf_export.rs:130` uses `tempfile::Builder…tempfile_in()` with `O_EXCL`.
+  Both moved to "Closed Findings" with the verifying evidence.
+
 ### Internal
 
+- **[CHG] `portable-pty` 0.8.1 → 0.9.0**, which drops the `serial` crate
+  (unmaintained since 2017, RUSTSEC-2017-0008) in favour of `serial2` and
+  pulls `nix` up to 0.28. No source change was required. Removes the only
+  `cargo audit` warning that reached the project through a direct dependency.
 - `encode_mouse_button_event()` and `mode_reports()` in `src/terminal.rs`
   (pure, unit-tested) next to the existing `encode_wheel_event()`;
   `PseudoTerminal::send_mouse_button()` writes them past `write_input()` so the

@@ -307,12 +307,18 @@ The application includes a self-update mechanism that downloads new versions fro
 # Simulate older version to trigger update availability
 ./ai-workbench --check-update --fake-version 0.37.0
 
-# Update to a specific version (for testing/downgrade)
-./ai-workbench --update-to v0.38.5
+# Update to a specific version (for testing/downgrade, debug builds only)
+./ai-workbench --update-to v1.6.0
 
 # Or without 'v' prefix - both formats work
-./ai-workbench --update-to 0.38.5
+./ai-workbench --update-to 1.6.0
 ```
+
+**Signature verification (since v1.11.0):** the client verifies every archive
+against the embedded release key (`signing/ai-workbench-pub.bin`), so a
+downgrade target must be **v1.6.0 or newer** — earlier releases predate signing
+and are rejected with a signature error. That rejection is the feature working,
+not a bug.
 
 ### Testing Methods
 
@@ -324,8 +330,8 @@ This tests the full update flow without releasing new versions:
 # 1. Check current version
 ./target/release/ai-workbench --check-update
 
-# 2. Downgrade to an older version
-./target/release/ai-workbench --update-to v0.38.5
+# 2. Downgrade to an older (signed, >= v1.6.0) version
+./target/release/ai-workbench --update-to v1.6.0
 
 # 3. Start app - should detect newer version available
 ./target/release/ai-workbench

@@ -154,9 +154,11 @@ jobs:
 
       # Sign release archives with the ed25519 signing key (zipsign). The
       # signature is embedded in the archive (no sidecar); a signed .tar.gz/.zip
-      # still extracts normally, so clients that do not yet verify keep working.
-      # Client-side verification (self_update .verifying_keys) is a later,
-      # separate change — see SECURITY-NOTES.md (SEC-01 rollout order).
+      # still extracts normally.
+      # Since v1.11.0 clients verify against the committed public key
+      # (self_update .verifying_keys, SEC-01 Half 2), so signing is MANDATORY:
+      # an unsigned release cannot be installed by anyone. Missing key material
+      # therefore fails the job instead of publishing a dead release.
       - name: Install Rust toolchain (for zipsign)
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
       - name: Cache cargo (zipsign)
@@ -170,8 +172,9 @@ jobs:
           ZIPSIGN_KEY_B64: ${{ secrets.ZIPSIGN_PRIVATE_KEY }}
         run: |
           if [ -z "$ZIPSIGN_KEY_B64" ]; then
-            echo "::warning::ZIPSIGN_PRIVATE_KEY not set — publishing UNSIGNED archives"
-            exit 0
+            echo "::error::ZIPSIGN_PRIVATE_KEY not set — refusing to publish unsigned archives."
+            echo "Clients verify signatures since v1.11.0; an unsigned release would be uninstallable."
+            exit 1
           fi
           echo "$ZIPSIGN_KEY_B64" | base64 -d > /tmp/zipsign-key.bin
           for f in release/*.tar.gz; do

@@ -12,6 +12,19 @@ use super::state::UpdateResult;
 use super::version::CURRENT_VERSION;
 use super::{BIN_NAME, REPO_NAME, REPO_OWNER};
 
+/// ed25519 public key the release archives are signed with (zipsign, SEC-01).
+///
+/// Embedded from the same `signing/ai-workbench-pub.bin` the release workflow
+/// verifies against right after signing, so the key in the binary and the key
+/// in CI cannot drift apart. With this configured, `self_update` refuses any
+/// archive that is unsigned or signed with a different key — a compromised
+/// release asset no longer installs itself on the next auto-update.
+///
+/// Consequence to keep in mind: releases before v1.6.0 predate signing and can
+/// no longer be installed, which only affects the debug-only `--update-to`
+/// downgrade path.
+const RELEASE_PUBLIC_KEY: [u8; 32] = *include_bytes!("../../signing/ai-workbench-pub.bin");
+
 /// Probe whether `dir` is writable by creating (and immediately removing) a
 /// temporary file in it.
 ///
@@ -95,6 +108,7 @@ pub fn perform_update_sync() -> UpdateResult {
         .bin_name(BIN_NAME)
         .target(target)
         .current_version(CURRENT_VERSION)
+        .verifying_keys([RELEASE_PUBLIC_KEY])
         .show_download_progress(false)
         .show_output(false)
         .no_confirm(true)
@@ -172,6 +186,7 @@ pub fn perform_update_to_version_sync(target_version: &str) -> UpdateResult {
         .target(target)
         .target_version_tag(&target_tag)
         .current_version(CURRENT_VERSION)
+        .verifying_keys([RELEASE_PUBLIC_KEY])
         .show_download_progress(false)
         .show_output(false)
         .no_confirm(true)

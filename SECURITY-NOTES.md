@@ -3,12 +3,33 @@
 Operational security playbook for ai-workbench. This file tracks the
 findings of the project audit and the remediation plan for each.
 
-## Self-Update Supply-Chain Hardening (HIGH — Half 1 landed v1.6.0, Half 2 open)
+## Self-Update Supply-Chain Hardening (HIGH — CLOSED in v1.11.0)
 
-**Status update (v1.6.0, 11.07.2026):** Half 1 (CI signing) is now live — the
-release workflow signs every archive with zipsign and verifies it against the
-committed public key. Half 2 (client-side `.verifying_keys()`) remains open and
-is gated on 2–3 signed releases shipping first (see Rollout Order below).
+**Status update (v1.11.0, 15.08.2026): both halves are live — this finding is
+closed.** Half 1 (CI signing) shipped in v1.6.0. Half 2 (client-side
+`.verifying_keys()`) is now wired: `src/update/install.rs` embeds
+`signing/ai-workbench-pub.bin` via `include_bytes!` as `RELEASE_PUBLIC_KEY` and
+passes it to both `Update::configure()` chains (auto-update and the debug-only
+`--update-to` downgrade). `self_update` now rejects any archive that is
+unsigned or signed with a different key, so a compromised release asset no
+longer installs itself.
+
+The rollout gate ("2–3 signed releases must ship first") was satisfied — every
+release since v1.6.0 is signed. Before enabling verification, the published
+v1.10.1 asset was downloaded and checked against the committed key
+(`zipsign verify tar … signing/ai-workbench-pub.bin` → `OK`), confirming that
+the key in the binary matches the key CI signs with.
+
+Two consequences of this change:
+
+- **Signing is now mandatory in CI.** The "Sign release archives" step fails the
+  job when `ZIPSIGN_PRIVATE_KEY` is missing instead of warning and publishing
+  unsigned archives — such a release would be uninstallable for every client.
+- **Releases before v1.6.0 can no longer be installed**, since they predate
+  signing. This affects only the debug-only `--update-to` downgrade path used
+  for update testing; pick a target ≥ v1.6.0.
+
+**Historical finding and remediation plan below, kept for the record.**
 
 **Finding** (audit 2026-05-11): `src/update/install.rs` uses
 `self_update::backends::github::Update` with default configuration. Downloads
@@ -153,38 +174,6 @@ that separate vector.
 
 ---
 
-## Shell Fallback in Dependency Probe (MEDIUM — open)
-
-**Finding**: `src/setup/dependency_checker.rs:172-186` builds a shell command
-string with `shlex::try_quote` (good, just migrated from `shell-escape`)
-then passes it to `$SHELL -i -c "<cmd>"`. Static call sites today are safe.
-The pattern is fragile — one careless caller passing PTY-derived text via
-`args` and a `shlex` bug becomes shell injection.
-
-**Mitigation**:
-
-- Replace the `-i -c` shell string with a direct `Command::new(name).args(args)`
-  invocation. The only reason to go through a shell is to resolve aliases or
-  shell functions; for binary lookups (which is the entire purpose of this
-  module), that is unnecessary.
-- If shell-resolved binaries are required, gate the call behind an explicit
-  allow-list of known dependency names.
-
----
-
-## Predictable Temp File Path (MEDIUM — open)
-
-**Finding**: `src/browser/pdf_export.rs:119` writes preview HTML to
-`$TMPDIR/<stem>-<dd.mm.yyyy>.html`. The path is guessable. On a multi-user
-system, a local attacker can pre-create the path as a symlink to a target
-file and the write redirects to it.
-
-**Mitigation**: Use `tempfile::Builder::new().prefix(stem).suffix(".html")
-.tempfile_in(env::temp_dir())?`. The crate opens with `O_EXCL` and an
-unpredictable suffix.
-
----
-
 ## Windows Config File Permissions (LOW — accepted)
 
 **Finding**: `src/config.rs:763-767`'s `set_restrictive_permissions()` is a
@@ -211,6 +200,22 @@ protect it. LazyGit and the User Terminal keep bracketed-paste wrapping.
 
 ## Closed Findings
 
+- **Shell fallback in dependency probe** (audit 2026-05-11, closed v0.90.0):
+  `src/setup/dependency_checker.rs` passed a `shlex`-quoted command string to
+  `$SHELL -i -c "<cmd>"`. Safe at every call site, but one careless caller
+  away from shell injection. Closed by deleting the fallback outright
+  (SEC-03/WR-02): `check_command()` now runs `Command::new(name).args(args)`
+  directly. Resolving shell aliases was never a requirement for binary
+  lookups, so nothing was lost. Verified 15.08.2026 — no `-i -c` invocation
+  remains in the module.
+- **Predictable temp file path** (audit 2026-05-11, closed v0.90.0):
+  `src/browser/pdf_export.rs` wrote preview HTML to a guessable
+  `$TMPDIR/<stem>-<date>.html`, allowing a local attacker on a multi-user
+  system to pre-create the path as a symlink and redirect the write. Closed
+  by `tempfile::Builder::new().prefix(...).suffix(".html").tempfile_in(...)`
+  (SEC-04/CR-03), which opens with `O_EXCL` and an unpredictable suffix;
+  `App::temp_preview_files` holds the handles for RAII cleanup. Verified
+  15.08.2026 at `src/browser/pdf_export.rs:130`.
 - **Typst PDF-export injection + path traversal** (audit 10.07.2026, v1.0.1):
   `src/browser/typst_pdf.rs` interpolated untrusted markdown link/image URLs
   into Typst string literals without escaping `"`, and fenced code content
