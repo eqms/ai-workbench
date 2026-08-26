@@ -371,6 +371,39 @@ cat ~/Library/Caches/ai-workbench/update.log
 tail -f ~/.cache/ai-workbench/update.log
 ```
 
+## Crash Log
+
+Every panic is appended to `crash.log` next to the update log, with version,
+thread (marked `[main]` or `[background]`), source location, message and a full
+backtrace:
+
+```bash
+cat ~/Library/Caches/ai-workbench/crash.log     # macOS
+cat ~/.cache/ai-workbench/crash.log             # Linux
+```
+
+This file exists because stderr is worthless in a TUI — anything printed there
+is overpainted by the next frame.
+
+**Panic hook rules (`src/crashlog.rs`, installed from `src/main.rs`).**
+`ratatui::init()` registers its own hook that restores the terminal on *any*
+panic, regardless of thread. That is wrong here: a PTY reader, the clipboard
+worker and the git-check threads can panic without ending the process, and
+restoring the terminal from them leaves the alternate screen and disables raw
+mode *while the event loop keeps drawing* — the UI paints over the shell's
+scrollback and goes deaf to input. It looks like a hard crash; the process is
+still running.
+
+Therefore:
+- `crashlog::install_panic_hook()` is called **twice** — once early, and again
+  **after `ratatui::init()`** to replace ratatui's hook. Do not drop the second
+  call, and do not chain onto the previous hook (that keeps ratatui's
+  unconditional restore alive and double-logs every panic).
+- Only the UI thread may run `restore_terminal()` or write to stderr.
+- A background panic surfaces as a red footer banner
+  (`⚠ internal error — see crash.log`), because the failure is otherwise
+  invisible — the affected pane just stops updating.
+
 ### Troubleshooting
 
 1. **"No releases found"**: Check that GitHub Release has assets for your platform
@@ -516,6 +549,7 @@ A Rust-based TUI (Terminal User Interface) multiplexer that gives developers an 
 - `println!` used only in CLI diagnostic modes (`--check-update`, `--clipboard-diag`) in `src/main.rs`
 - TUI operation: no stdout/stderr logging during normal operation (would corrupt terminal rendering)
 - Update operations write to `dirs::cache_dir()/ai-workbench/update.log` (macOS `~/Library/Caches/...`, Linux `~/.cache/...`) via `src/update/log.rs`
+- Panics are written to `dirs::cache_dir()/ai-workbench/crash.log` via `src/crashlog.rs` — stderr is unusable in a TUI, so this is the only post-mortem evidence
 - Errors that cannot be surfaced to the user are silently dropped (by design — TUI constraint)
 ## Comments
 ## Function Design

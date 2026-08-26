@@ -1,5 +1,36 @@
 # Release Notes
 
+## Version 1.11.1 (26.08.2026)
+
+A panic in a background thread no longer destroys the running UI, and every
+panic is now written to a crash log.
+
+### Fixed
+
+- **[FIX] A background-thread panic no longer tears down the terminal.**
+  `ratatui::init()` installs a panic hook that restores the terminal on *any*
+  panic — including one on a PTY reader thread, the clipboard worker or a
+  git-check thread, none of which end the process. The result: the alternate
+  screen was left, raw mode and mouse capture were switched off, and the event
+  loop kept drawing — painting the UI over the shell's scrollback while the app
+  stopped responding to input. It looks exactly like a hard crash, but the
+  process is still alive, and the panic message that would have explained it is
+  overpainted by the next frame. The hook is now re-installed after
+  `ratatui::init()` and only the UI thread may touch the terminal; a background
+  panic takes down its own thread and nothing else.
+
+### Added
+
+- **[ADD] Crash log.** Every panic — foreground or background — is appended to
+  `crash.log` in the platform cache directory (macOS
+  `~/Library/Caches/ai-workbench/crash.log`, Linux
+  `~/.cache/ai-workbench/crash.log`) with version, thread, location, message
+  and a full backtrace. A TUI overpaints anything written to stderr, so without
+  a file on disk a crash left no evidence at all.
+- **[ADD] Footer banner for background failures.** When a background thread
+  dies, the footer shows a persistent red `⚠ internal error — see crash.log`.
+  Without it the loss is silent: the affected pane simply stops updating.
+
 ## Version 1.11.0 (15.08.2026)
 
 Mouse clicks now reach the application running inside a pane.

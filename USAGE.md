@@ -413,6 +413,23 @@ bridge when it cannot read the system clipboard under XRDP. Run
 relevant environment variables, and a copy/paste roundtrip test. Override the
 strategy with `CLAUDE_WORKBENCH_CLIPBOARD=osc52|arboard|subprocess`.
 
+### Crash Log
+
+If the app ever misbehaves — a pane stops updating, or the display falls apart —
+check the crash log:
+
+```bash
+cat ~/Library/Caches/ai-workbench/crash.log     # macOS
+cat ~/.cache/ai-workbench/crash.log             # Linux
+```
+
+Every internal error is recorded there with thread, source location and
+backtrace. A message printed to the terminal would be overpainted by the next
+frame, so this file is the one place the evidence survives. When a background
+task fails, the footer shows a red `⚠ internal error — see crash.log` — the app
+keeps running, but whatever that task did (a pane, the clipboard) has stopped.
+Please attach the file when reporting a problem.
+
 ---
 
 <a name="deutsch"></a>
@@ -833,3 +850,21 @@ wenn diese unter XRDP das System-Clipboard nicht lesen kann. `ai-workbench
 --clipboard-diag` zeigt die aktive Strategie, Helfer-Pfade, relevante Umgebungs-
 variablen und einen Copy/Paste-Roundtrip-Test. Strategie überschreibbar via
 `CLAUDE_WORKBENCH_CLIPBOARD=osc52|arboard|subprocess`.
+
+### Absturzprotokoll
+
+Wenn sich die Anwendung merkwürdig verhält — ein Pane aktualisiert sich nicht
+mehr, oder die Darstellung zerfällt — hilft das Absturzprotokoll:
+
+```bash
+cat ~/Library/Caches/ai-workbench/crash.log     # macOS
+cat ~/.cache/ai-workbench/crash.log             # Linux
+```
+
+Dort wird jeder interne Fehler mit Thread, Quellcode-Position und Backtrace
+festgehalten. Eine Meldung im Terminal würde vom nächsten gezeichneten Bild
+überschrieben — diese Datei ist also die einzige Stelle, an der die Spur
+erhalten bleibt. Scheitert eine Hintergrund-Aufgabe, zeigt der Footer ein rotes
+`⚠ internal error — see crash.log`: die Anwendung läuft weiter, aber was diese
+Aufgabe erledigt hat (ein Pane, die Zwischenablage), steht still. Bitte die
+Datei bei Fehlermeldungen mitschicken.

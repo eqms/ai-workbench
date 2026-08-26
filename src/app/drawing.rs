@@ -187,6 +187,7 @@ impl App {
                 clipboard_warning,
                 ssh_image_paste_hint,
                 terminal_prefix_armed: self.terminal_prefix_armed,
+                background_crash: crate::crashlog::has_recorded_crash(),
                 ai_label: self.backend.short_label(),
             };
             frame.render_widget(footer_widget, footer);

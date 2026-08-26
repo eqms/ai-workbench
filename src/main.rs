@@ -4,6 +4,7 @@ pub mod backend;
 pub mod browser;
 pub mod clipboard;
 pub mod config;
+pub mod crashlog;
 pub mod filter;
 pub mod git;
 pub mod input;
@@ -22,7 +23,6 @@ use clap::Parser;
 use config::load_config;
 use session::{load_session, save_session, SessionState};
 use std::io::Write;
-use std::panic;
 use std::path::PathBuf;
 use update::{check_for_update_with_version, UpdateCheckResult};
 #[cfg(debug_assertions)]
@@ -649,12 +649,22 @@ fn main() -> Result<()> {
 }
 
 async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Result<()> {
-    // Set up panic hook to restore terminal on crash
-    let original_hook = panic::take_hook();
-    panic::set_hook(Box::new(move |panic_info| {
-        restore_terminal();
-        original_hook(panic_info);
-    }));
+    // Panic hook. Every panic is written to the crash log; only a panic on the
+    // rendering thread may touch the terminal.
+    //
+    // A background thread (PTY reader, clipboard worker, git check) that panics
+    // takes only itself down — the event loop keeps drawing. Restoring the
+    // terminal from that thread therefore left the alternate screen, disabled
+    // raw mode and mouse capture *underneath a running UI*: the app kept
+    // painting frames into the primary buffer, on top of the shell's
+    // scrollback, and stopped responding to keys. That looks exactly like a
+    // hard crash while the process is in fact still alive, and it overpaints
+    // the panic message that would have explained it.
+    //
+    // Printing the message is suppressed for background threads for the same
+    // reason — stderr goes straight into the TUI. The crash log keeps it.
+    let ui_thread = std::thread::current().id();
+    crashlog::install_panic_hook(ui_thread, restore_terminal);
 
     // Ignore SIGTSTP (Ctrl+Z) to prevent suspend with broken terminal state
     // User can still quit with Ctrl+Q or Ctrl+C
@@ -713,6 +723,14 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
     }
 
     let mut terminal = ratatui::init();
+    // ratatui::init() installs its own panic hook, which restores the terminal
+    // on *any* panic — including one on a PTY reader, the clipboard worker or a
+    // git-check thread, none of which end the process. That leaves the
+    // alternate screen and disables raw mode while the event loop keeps
+    // drawing: the UI paints over the shell's scrollback and stops accepting
+    // input, which looks like a hard crash and buries the panic message.
+    // Re-install ours so only the UI thread can touch the terminal.
+    crashlog::install_panic_hook(ui_thread, restore_terminal);
     // ratatui::init() enables raw mode through ratatui-crossterm's own
     // crossterm 0.29, so the direct crossterm 0.28 dependency (which runs the
     // event loop and its input parser) still believes the terminal is cooked.

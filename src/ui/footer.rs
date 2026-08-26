@@ -70,6 +70,10 @@ pub struct Footer {
     /// True while the terminal-pane prefix (Ctrl+B) is armed — shows the
     /// available prefix commands as a cyan banner.
     pub terminal_prefix_armed: bool,
+    /// True once a background thread has panicked this session. The thread is
+    /// gone (its pane stops updating) while the app keeps running, so this
+    /// banner is the only signal the user gets — it points at the crash log.
+    pub background_crash: bool,
     /// Short label for the F4 (AI pane) hotkey — the active backend's name
     /// (e.g. "Claude", "OpenCode", "Pi").
     pub ai_label: &'static str,
@@ -150,6 +154,7 @@ impl Default for Footer {
             clipboard_warning: None,
             ssh_image_paste_hint: None,
             terminal_prefix_armed: false,
+            background_crash: false,
             ai_label: "Claude",
         }
     }
@@ -359,7 +364,28 @@ impl Widget for Footer {
         let datetime_text = format_datetime();
         let version = env!("CARGO_PKG_VERSION");
 
-        let right_spans = if self.terminal_prefix_armed {
+        let right_spans = if self.background_crash {
+            // A background thread died — persistent red banner, highest
+            // priority: something in the app stopped working silently.
+            use ratatui::style::Modifier;
+            vec![
+                Span::styled(
+                    format!(" {} │ ", datetime_text),
+                    Style::default().bg(Color::DarkGray).fg(Color::White),
+                ),
+                Span::styled(
+                    " \u{26A0} internal error — see crash.log ",
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::Red)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(" │ v{} ", version),
+                    Style::default().bg(Color::DarkGray).fg(Color::White),
+                ),
+            ]
+        } else if self.terminal_prefix_armed {
             // Terminal prefix armed — cyan command cheat-sheet
             use ratatui::style::Modifier;
             vec![
