@@ -116,9 +116,19 @@ impl PreviewState {
 
             // Use tui-markdown for markdown files, syntect for others
             if self.is_markdown {
-                // Catch potential panics in tui-markdown library (known bug in 0.3.7)
+                // Catch potential panics in the tui-markdown library. 0.3.8 panics
+                // on a task-list item that follows a code block (`spans.insert(1, …)`
+                // on a line with no spans); 0.3.9 fixes that case, but the guard stays
+                // — a rendering panic must never take the pane down.
+                //
                 // IMPORTANT: The entire conversion must be inside catch_unwind because
                 // tui-markdown can panic during iteration over md_text.lines, not just in from_str()
+                //
+                // The `expect_panic` guard tells the panic hook that this panic is
+                // handled here: without it the hook restores the terminal mid-frame
+                // (leaving the alternate screen under a running event loop), which
+                // corrupts the display even though the fallback below works fine.
+                let _expected = crate::crashlog::expect_panic();
                 let content_clone = content.clone();
                 let result: Result<Vec<Line<'static>>, _> =
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1641,5 +1651,28 @@ fn get_border_style(
         (_, _, true) => (Style::default().fg(Color::Green), BorderType::Double),
         // Default: no style + Rounded
         _ => (Style::default(), BorderType::Rounded),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The pattern that crashed the UI in v1.11.1: a task-list item following a
+    /// code block made tui-markdown 0.3.8 insert into a line with no spans
+    /// (`spans.insert(1, …)`), which took the whole terminal down with it.
+    const TASK_LIST_AFTER_CODE_BLOCK: &str =
+        "```bash\n```\n- Produces: nichts\n\n- [x] **Step 1: Anwenderdokument schreiben**\n";
+
+    #[test]
+    fn markdown_with_a_task_list_after_a_code_block_renders() {
+        let result = std::panic::catch_unwind(|| {
+            tui_markdown::from_str(TASK_LIST_AFTER_CODE_BLOCK)
+                .lines
+                .len()
+        });
+        assert!(
+            result.is_ok(),
+            "tui-markdown panicked on a task list following a code block"
+        );
+        assert!(result.unwrap() > 0, "rendering produced no lines");
     }
 }

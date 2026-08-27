@@ -333,6 +333,31 @@ impl PseudoTerminal {
         )
     }
 
+    /// Whether the inner application has asked for bracketed paste (DECSET 2004).
+    ///
+    /// Modern TUI CLIs — Claude Code, OpenCode, Pi, Codex, fish, vim — enable it
+    /// so a pasted block arrives as one unit instead of as typed keystrokes.
+    pub fn wants_bracketed_paste(&self) -> bool {
+        lock_or_recover(&self.parser).screen().bracketed_paste()
+    }
+
+    /// Deliver pasted text to the inner application the way it asked for it.
+    ///
+    /// With bracketed paste enabled, the text is framed by `ESC[200~`/`ESC[201~`
+    /// so the receiver treats it as one block; without it, embedded newlines act
+    /// as Enter and a multi-line paste is submitted line by line — which is how
+    /// a long paste ended up truncated to its first line.
+    ///
+    /// An end marker inside the pasted text itself is neutralized: it would end
+    /// the block early and let the remainder execute as typed input.
+    pub fn send_paste(&mut self, text: &str) -> Result<()> {
+        if !self.wants_bracketed_paste() {
+            return self.write_input(text.as_bytes());
+        }
+        let payload = strip_paste_markers(text);
+        self.write_input(format!("\x1b[200~{}\x1b[201~", payload).as_bytes())
+    }
+
     /// Forward a mouse-wheel event to the inner application.
     /// Writes directly to the PTY writer — unlike `write_input`, this must
     /// not reset the scrollback position. `col`/`row` are 1-based
@@ -593,8 +618,29 @@ impl PseudoTerminal {
     }
 }
 
+/// Remove bracketed-paste markers from text that is about to be sent inside a
+/// bracketed-paste block. A `ESC[201~` in the payload would close the block
+/// early, so everything after it would be interpreted as typed input.
+pub(crate) fn strip_paste_markers(text: &str) -> String {
+    text.replace("\x1b[200~", "").replace("\x1b[201~", "")
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn paste_markers_inside_the_payload_are_removed() {
+        // Otherwise the embedded end marker closes the block and the rest of
+        // the paste executes as typed input.
+        let text = "safe\x1b[201~rm -rf /\x1b[200~more";
+        assert_eq!(super::strip_paste_markers(text), "saferm -rf /more");
+    }
+
+    #[test]
+    fn plain_text_survives_paste_marker_stripping() {
+        let text = "line one\nline two\n";
+        assert_eq!(super::strip_paste_markers(text), text);
+    }
+
     use super::*;
 
     #[test]

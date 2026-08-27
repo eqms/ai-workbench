@@ -1,5 +1,45 @@
 # Release Notes
 
+## Version 1.12.0 (27.08.2026)
+
+Two defects that made the application look broken from the outside: a caught
+rendering panic still tore the terminal down, and a multi-line paste into the
+AI pane arrived truncated.
+
+### Fixed
+
+- **[FIX] A caught panic no longer destroys the terminal.** Markdown rendering
+  runs inside `catch_unwind` precisely so a library panic degrades to raw text
+  instead of taking the pane down. But `catch_unwind` only stops the unwind —
+  the panic hook still runs first, and on the UI thread it restored the
+  terminal: alternate screen left, raw mode off, while the event loop kept
+  drawing over the shell's scrollback. The fallback worked; the display did
+  not. `crashlog::expect_panic()` now marks such a scope, and a panic inside it
+  is written to the crash log without touching the terminal and without
+  flagging the session as crashed. v1.11.1 fixed the same corruption for
+  background threads; this closes the caught-panic case on the UI thread.
+
+- **[FIX] Markdown with a task list after a code block no longer panics.**
+  tui-markdown 0.3.8 inserted a task-list marker at index 1 of a line that had
+  no spans (`insertion index (is 1) should be <= len (is 0)`), which is what
+  triggered the crash above when browsing plan documents — 70 files in a single
+  local tree hit it. Raised to 0.3.9, which fixes the case; the `catch_unwind`
+  guard stays, because a rendering panic must never take the pane down.
+
+- **[FIX] Multi-line paste into the AI pane is no longer truncated.** Cmd+V
+  (and any terminal-side paste) reached the Claude/OpenCode/Pi/Codex pane as
+  raw bytes, on the assumption that the CLI does not understand bracketed
+  paste. Claude Code does request it (`ESC[?2004h`, verified against 2.x), so
+  every newline in the pasted block acted as Enter: the first line was
+  submitted and the rest was lost. Ctrl+V was unaffected because it forwards
+  `0x16` and lets the CLI read the clipboard itself — which is why the two
+  paths behaved differently. All three PTY panes now share
+  `PseudoTerminal::send_paste()`, which wraps the text only when the inner
+  application has announced bracketed paste — the same "the inner app decides"
+  rule the mouse routing already follows. Paste markers inside the payload are
+  stripped so they cannot end the block early and let the remainder run as
+  typed input.
+
 ## Version 1.11.1 (26.08.2026)
 
 A panic in a background thread no longer destroys the running UI, and every

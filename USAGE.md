@@ -392,6 +392,19 @@ Reports SSH state, the detected terminal capability, the raw environment
 markers, the effective export directory, and the configured mode. Note: under
 tmux you also need `set -g allow-passthrough on` (tmux ≥ 3.3).
 
+### Pasting Multi-Line Text
+
+Pasting works the same in all three PTY panes, whichever way you trigger it —
+your terminal's own paste (`Cmd+V` on macOS, `Ctrl+Shift+V` on Linux), **F11**
+Universal Paste, or right-click. The text is delivered as one block whenever the
+program running in the pane asks for bracketed paste, which Claude Code,
+OpenCode, Pi, Codex, `fish` and `vim` all do. Line breaks in the pasted text stay
+line breaks and no longer submit the input early.
+
+If a program does *not* request bracketed paste, the text is sent as plain
+keystrokes — its newlines then act as Enter, which is that program's behavior,
+not a limitation of the workbench.
+
 ### Clipboard Troubleshooting (Debian / Xfce / Kitty / XRDP)
 
 The clipboard uses a fallback chain: `arboard` → `xclip` → `xsel` → `wl-copy` →
@@ -828,6 +841,20 @@ ai-workbench --open-diag
 Meldet SSH-Status, erkannte Terminal-Capability, die rohen Environment-Marker,
 das effektive Export-Verzeichnis und den konfigurierten Modus. Hinweis: Unter
 tmux zusätzlich `set -g allow-passthrough on` (tmux ≥ 3.3) nötig.
+
+### Mehrzeiligen Text einfügen
+
+Das Einfügen verhält sich in allen drei PTY-Bereichen gleich, unabhängig davon,
+wie du es auslöst — über das Einfügen des Terminals selbst (`Cmd+V` unter macOS,
+`Ctrl+Shift+V` unter Linux), über **F11** Universal Paste oder per Rechtsklick.
+Der Text kommt als ein Block an, sobald das Programm im Bereich Bracketed Paste
+anfordert; Claude Code, OpenCode, Pi, Codex, `fish` und `vim` tun das. Zeilen-
+umbrüche im eingefügten Text bleiben Zeilenumbrüche und schicken die Eingabe
+nicht mehr vorzeitig ab.
+
+Fordert ein Programm kein Bracketed Paste an, geht der Text als einfache
+Tastenanschläge hinaus — seine Zeilenumbrüche wirken dann wie Enter. Das ist
+Verhalten dieses Programms, keine Einschränkung der Workbench.
 
 ### Clipboard-Fehlerbehebung (Debian / Xfce / Kitty / XRDP)
 

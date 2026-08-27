@@ -17,6 +17,48 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// instead of leaving the user with a silently degraded application.
 static CRASH_RECORDED: AtomicBool = AtomicBool::new(false);
 
+thread_local! {
+    /// Depth of nested [`expect_panic`] guards on this thread.
+    ///
+    /// Non-zero means the current thread is inside a `catch_unwind` that will
+    /// handle a panic itself, so the process keeps running and the terminal
+    /// must be left exactly as it is.
+    static EXPECTED_PANIC_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// RAII guard marking the enclosing scope as one whose panics are caught.
+///
+/// See [`expect_panic`].
+pub struct ExpectedPanicGuard(());
+
+impl Drop for ExpectedPanicGuard {
+    fn drop(&mut self) {
+        EXPECTED_PANIC_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+    }
+}
+
+/// Mark the current scope as "panics here are caught and handled".
+///
+/// A `catch_unwind` stops the unwind, but it does **not** stop the panic hook,
+/// which runs first. On the UI thread that hook restores the terminal — and
+/// restoring it under a still-running event loop is exactly the corruption the
+/// hook exists to prevent: the alternate screen is left, raw mode is disabled,
+/// and the next frame paints over the shell's scrollback. The application is
+/// fine; the terminal is not.
+///
+/// Hold this guard around every `catch_unwind` whose failure is a recoverable
+/// fallback. The panic is still written to the crash log, but the terminal is
+/// left untouched and the session is not flagged as crashed.
+pub fn expect_panic() -> ExpectedPanicGuard {
+    EXPECTED_PANIC_DEPTH.with(|d| d.set(d.get().saturating_add(1)));
+    ExpectedPanicGuard(())
+}
+
+/// True while the current thread is inside an [`expect_panic`] scope.
+pub fn panic_is_expected() -> bool {
+    EXPECTED_PANIC_DEPTH.with(|d| d.get()) > 0
+}
+
 /// Path of the crash log, next to the update log in the platform cache dir.
 pub fn log_file_path() -> PathBuf {
     dirs::cache_dir()
@@ -54,6 +96,13 @@ pub fn install_panic_hook(ui_thread: std::thread::ThreadId, restore: fn()) {
     let _ = std::panic::take_hook();
 
     std::panic::set_hook(Box::new(move |info| {
+        // A caught panic is a handled fallback, not a crash: log it for
+        // diagnosis, but leave the terminal and the crash flag alone.
+        if panic_is_expected() {
+            record_panic_only(info);
+            return;
+        }
+
         record_panic(info);
 
         if !may_restore_terminal(ui_thread) {
@@ -82,6 +131,16 @@ pub fn install_panic_hook(ui_thread: std::thread::ThreadId, restore: fn()) {
 /// Called from the panic hook, so it must not panic itself — every fallible
 /// step is best-effort.
 pub fn record_panic(info: &std::panic::PanicHookInfo<'_>) {
+    record_panic_only(info);
+    CRASH_RECORDED.store(true, Ordering::Relaxed);
+}
+
+/// Append a panic report without flagging the session as crashed.
+///
+/// Used for panics caught by an [`expect_panic`] scope: they are worth a log
+/// entry, but the user sees a working application and must not be told
+/// otherwise.
+fn record_panic_only(info: &std::panic::PanicHookInfo<'_>) {
     let location = info
         .location()
         .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
@@ -101,7 +160,6 @@ pub fn record_panic(info: &std::panic::PanicHookInfo<'_>) {
     let report = format_report(&thread_desc, is_main, &location, &message, &backtrace);
 
     write_report(&report);
-    CRASH_RECORDED.store(true, Ordering::Relaxed);
 }
 
 /// Build the report body. Pure, so the layout is unit-testable.
@@ -182,6 +240,35 @@ mod tests {
         assert!(
             !from_worker,
             "a background thread must never restore the terminal"
+        );
+    }
+
+    #[test]
+    fn a_caught_panic_is_not_treated_as_a_crash() {
+        // The guard is what keeps the panic hook from restoring the terminal
+        // under a running event loop — see expect_panic().
+        assert!(!panic_is_expected());
+        {
+            let _guard = expect_panic();
+            assert!(panic_is_expected());
+            {
+                let _nested = expect_panic();
+                assert!(panic_is_expected());
+            }
+            assert!(panic_is_expected(), "nested guard must not clear the outer");
+        }
+        assert!(!panic_is_expected());
+    }
+
+    #[test]
+    fn the_expected_panic_scope_is_per_thread() {
+        let _guard = expect_panic();
+        assert!(panic_is_expected());
+
+        let in_worker = std::thread::spawn(panic_is_expected).join().unwrap();
+        assert!(
+            !in_worker,
+            "another thread's panic must still tear the terminal down"
         );
     }
 

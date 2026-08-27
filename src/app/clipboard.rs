@@ -268,17 +268,11 @@ impl App {
         };
 
         match self.active_pane {
-            PaneId::Claude => {
-                // Claude CLI doesn't understand bracketed paste sequences.
-                // Send raw bytes — for multiline, the user must use \ continuation.
-                if let Some(pty) = self.terminals.get_mut(&PaneId::Claude) {
-                    let _ = pty.write_input(text.as_bytes());
-                }
-            }
-            PaneId::LazyGit | PaneId::Terminal => {
+            PaneId::Claude | PaneId::LazyGit | PaneId::Terminal => {
+                // Same routing as the Event::Paste path: the inner application
+                // announces bracketed paste itself (see send_paste).
                 if let Some(pty) = self.terminals.get_mut(&self.active_pane) {
-                    let bracketed = format!("\x1b[200~{}\x1b[201~", text);
-                    let _ = pty.write_input(bracketed.as_bytes());
+                    let _ = pty.send_paste(&text);
                 }
             }
             PaneId::Preview => {

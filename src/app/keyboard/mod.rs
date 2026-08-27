@@ -180,19 +180,14 @@ impl App {
 
     pub(super) fn handle_paste_event(&mut self, text: String) {
         match self.active_pane {
-            PaneId::Claude => {
-                // Claude CLI doesn't understand bracketed paste sequences
-                // Send text directly - for multiline, user must use \ continuation
-                if let Some(pty) = self.terminals.get_mut(&PaneId::Claude) {
-                    let _ = pty.write_input(text.as_bytes());
-                }
-            }
-            PaneId::LazyGit | PaneId::Terminal => {
+            PaneId::Claude | PaneId::LazyGit | PaneId::Terminal => {
+                // Let the inner application decide, the same way mouse events
+                // are routed: it announces bracketed paste via DECSET 2004.
+                // Claude Code does (verified against 2.x) — sending the text
+                // raw made every newline act as Enter, so a multi-line paste
+                // was submitted line by line and appeared truncated.
                 if let Some(pty) = self.terminals.get_mut(&self.active_pane) {
-                    // Wrap in bracketed paste escape sequences
-                    // \x1b[200~ = start paste, \x1b[201~ = end paste
-                    let bracketed = format!("\x1b[200~{}\x1b[201~", text);
-                    let _ = pty.write_input(bracketed.as_bytes());
+                    let _ = pty.send_paste(&text);
                 }
             }
             PaneId::Preview => {
