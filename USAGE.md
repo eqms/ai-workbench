@@ -274,6 +274,12 @@ Open files in external applications:
 
 **Note:** Mouse selection is character-level (not line-based like keyboard selection).
 
+**Returning from another application:** the click that brings the terminal window
+forward only activates it — it moves focus to the pane under the cursor and stops
+there. Without this it would reach the application in the pane and, in a Claude
+Code dialog, answer the question you had not read yet. The next click works
+normally. Scrolling is never affected.
+
 **When the pane runs a mouse-aware application** (Claude Code, lazygit, or anything
 else that enables mouse tracking), the mouse belongs to that application — this is
 what makes Claude Code's "Jump to bottom (click)" button and lazygit's panels
@@ -719,6 +725,12 @@ Dateien in externen Anwendungen öffnen:
 4. Gelbe Hervorhebung zeigt ausgewählte Zeichen
 
 **Hinweis:** Maus-Auswahl ist zeichenweise (nicht zeilenbasiert wie Tastatur-Auswahl).
+
+**Rückkehr aus einer anderen Anwendung:** Der Klick, der das Terminalfenster nach
+vorn holt, aktiviert es nur — er setzt den Fokus auf den Bereich unter dem Zeiger
+und endet dort. Andernfalls erreichte er die Anwendung im Bereich und beantwortete
+in einem Claude-Code-Dialog die Frage, die du noch gar nicht gelesen hast. Der
+nächste Klick wirkt normal. Das Scrollen ist nie betroffen.
 
 **Wenn im Bereich eine maus-fähige Anwendung läuft** (Claude Code, lazygit oder jede
 andere Anwendung mit aktivem Mouse-Tracking), gehört die Maus dieser Anwendung —

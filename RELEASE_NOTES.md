@@ -1,5 +1,22 @@
 # Release Notes
 
+## Version 1.12.1 (27.08.2026)
+
+### Fixed
+
+- **[FIX] The click that brings the window forward no longer answers a
+  prompt.** Since v1.11.0 mouse clicks are forwarded to applications that track
+  the mouse, and Claude Code enables tracking for its question dialogs. Coming
+  back from another application and clicking into the pane therefore submitted
+  an answer instead of just activating the window — the click was meant for the
+  window, not for the prompt. Focus reporting (DECSET 1004) is now enabled, so
+  a button press within 500 ms of the window regaining focus only moves focus to
+  the pane under the cursor; its drag and release events are dropped with it, so
+  an application that never saw the press does not see a release either. The
+  next click reaches the application normally. Wheel events are never
+  suppressed, clicks inside the workbench are unaffected, and terminals without
+  focus reporting behave exactly as before.
+
 ## Version 1.12.0 (27.08.2026)
 
 Two defects that made the application look broken from the outside: a caught

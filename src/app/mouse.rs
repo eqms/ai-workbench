@@ -36,6 +36,27 @@ fn pane_at_position(rects: &super::LayoutRects, x: u16, y: u16) -> Option<PaneId
     }
 }
 
+/// How long after the terminal window regains focus a button press still
+/// counts as the click that activated it.
+///
+/// The activating click *is* the activation, so it arrives immediately; a
+/// deliberate click seconds later must not be swallowed. Keyboard activation
+/// (Cmd+Tab) raises focus with no click at all, and the window then simply
+/// stays armed until this window elapses.
+pub(crate) const ACTIVATION_CLICK_WINDOW: std::time::Duration =
+    std::time::Duration::from_millis(500);
+
+/// Whether a button press this soon after regaining focus is the click that
+/// brought the window forward.
+///
+/// Pure, so the timing rule is unit-testable without a terminal.
+pub(crate) fn is_window_activation_click(
+    focus_regained: Option<std::time::Instant>,
+    now: std::time::Instant,
+) -> bool {
+    focus_regained.is_some_and(|t| now.duration_since(t) < ACTIVATION_CLICK_WINDOW)
+}
+
 /// Direction of a mouse-wheel scroll over the file-browser pane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ScrollDirection {
@@ -335,6 +356,41 @@ impl App {
                 self.intro.dismiss();
             }
             return;
+        }
+
+        // Click-to-activate: when the window has just come back from the
+        // background, the first button press only moves focus. Forwarding it
+        // would answer whatever prompt the app in the pane is showing —
+        // Claude Code enables mouse tracking for its dialogs, so the click
+        // that was meant to reach the window landed as a selection.
+        //
+        // Wheel events are deliberately not suppressed: scrolling a pane that
+        // just came forward is harmless and expected.
+        match mouse.kind {
+            MouseEventKind::Down(_) => {
+                if is_window_activation_click(self.focus_regained_at, std::time::Instant::now()) {
+                    self.focus_regained_at = None;
+                    self.swallowing_activation_click = true;
+                    // Still move focus, so the click is not simply lost: the
+                    // pane the user aimed at becomes active and the next click
+                    // reaches the application inside it.
+                    if let Some(pane) = pane_at_position(&rects, mouse.column, mouse.row) {
+                        self.active_pane = pane;
+                    }
+                    return;
+                }
+            }
+            // Drop the rest of the swallowed interaction. An application that
+            // never saw the press must not see the drag or the release.
+            MouseEventKind::Drag(_) if self.swallowing_activation_click => return,
+            MouseEventKind::Up(_) if self.swallowing_activation_click => {
+                self.swallowing_activation_click = false;
+                return;
+            }
+            _ => {
+                // Any other event means the interaction is over.
+                self.swallowing_activation_click = false;
+            }
         }
 
         let files = rects.files;
@@ -1297,6 +1353,41 @@ impl App {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_click_right_after_regaining_focus_only_activates() {
+        // The click that brings the window forward *is* the activation, so it
+        // arrives immediately.
+        let now = Instant::now();
+        assert!(super::is_window_activation_click(Some(now), now));
+    }
+
+    #[test]
+    fn a_click_long_after_regaining_focus_is_deliberate() {
+        // Keyboard activation (Cmd+Tab) raises focus without a click; a click
+        // seconds later is meant for the application in the pane.
+        let now = Instant::now();
+        let focus = now - Duration::from_secs(3);
+        assert!(!super::is_window_activation_click(Some(focus), now));
+    }
+
+    #[test]
+    fn the_boundary_of_the_activation_window_is_exclusive() {
+        let now = Instant::now();
+        let inside = now - (super::ACTIVATION_CLICK_WINDOW - Duration::from_millis(1));
+        let outside = now - super::ACTIVATION_CLICK_WINDOW;
+        assert!(super::is_window_activation_click(Some(inside), now));
+        assert!(!super::is_window_activation_click(Some(outside), now));
+    }
+
+    #[test]
+    fn without_a_focus_event_no_click_is_suppressed() {
+        // Terminals that do not support focus reporting send nothing, and the
+        // behavior must stay exactly as it was.
+        assert!(!super::is_window_activation_click(None, Instant::now()));
+    }
+
     use super::{
         clamp_selected_to_window, pane_cell_coords, scroll_files_pane, Rect, ScrollDirection,
     };

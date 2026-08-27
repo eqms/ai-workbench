@@ -224,6 +224,7 @@ fn restore_terminal() {
         crossterm::event::PopKeyboardEnhancementFlags,
         crossterm::event::DisableMouseCapture,
         crossterm::event::DisableBracketedPaste,
+        crossterm::event::DisableFocusChange,
         crossterm::terminal::LeaveAlternateScreen,
         crossterm::cursor::Show
     );
@@ -742,7 +743,14 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
     crossterm::execute!(
         std::io::stdout(),
         crossterm::event::EnableMouseCapture,
-        crossterm::event::EnableBracketedPaste
+        crossterm::event::EnableBracketedPaste,
+        // Focus reporting (DECSET 1004) tells us when the terminal window
+        // comes back from the background. Without it the click that merely
+        // activates the window is indistinguishable from a deliberate one and
+        // gets forwarded to the mouse-aware app in the pane — answering a
+        // Claude Code prompt by accident. Terminals that do not support it
+        // simply send nothing and the behavior is unchanged.
+        crossterm::event::EnableFocusChange
     )?;
 
     // Boot screen: the alternate screen is already active (blank), but the

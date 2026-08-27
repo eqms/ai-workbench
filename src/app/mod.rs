@@ -128,6 +128,14 @@ pub struct App {
     // release events keep going there until the button comes up, even if the
     // cursor leaves the pane.
     pub pty_mouse_capture: Option<PaneId>,
+    // Window-activating click suppression: set when the terminal window regains
+    // focus, so the click that merely brought it forward is not forwarded to a
+    // mouse-aware app in the pane. See `window_activation_click()`.
+    pub focus_regained_at: Option<std::time::Instant>,
+    // True while swallowing the button interaction that activated the window,
+    // so its release and drag events are dropped as well — an app that saw no
+    // press must not see a release.
+    pub swallowing_activation_click: bool,
     // Git remote change detection state
     pub git_remote: GitRemoteState,
     // Async job: git remote-ahead check
@@ -356,6 +364,8 @@ impl App {
             drag_state: DragState::default(),
             mouse_selection: MouseSelection::default(),
             pty_mouse_capture: None,
+            focus_regained_at: None,
+            swallowing_activation_click: false,
             git_remote: GitRemoteState::default(),
             git_check_job: JobState::default(),
             update_state: UpdateState::new(),
@@ -529,6 +539,15 @@ impl App {
                     }
                     Event::Paste(text) => {
                         self.handle_paste_event(text);
+                    }
+                    // The window came back from the background. Arm the
+                    // activation-click suppression (see mouse.rs).
+                    Event::FocusGained => {
+                        self.focus_regained_at = Some(std::time::Instant::now());
+                    }
+                    Event::FocusLost => {
+                        self.focus_regained_at = None;
+                        self.swallowing_activation_click = false;
                     }
 
                     _ => {}
