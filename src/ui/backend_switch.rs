@@ -1,7 +1,7 @@
 //! AI backend selection menu (F8).
 //!
 //! Opened with F8, this modal lets the user pick which AI backend
-//! (Claude / OpenCode / Pi / Codex / Ollama OpenCode / Ollama Pi) drives the
+//! (Claude / Codex / Antigravity / OpenCode / Pi / Ollama variants) drives the
 //! primary pane. Unlike the old cycle-on-keypress behaviour, the target is
 //! shown and confirmed explicitly: F8 / ↑↓ / j k move the highlight, Enter
 //! applies the selection (respawning the AI pane), Esc cancels without a switch.
@@ -23,6 +23,8 @@ use crate::backend::AiBackend;
 #[derive(Debug, Clone, Default)]
 pub struct BackendSwitchState {
     pub visible: bool,
+    /// True when the menu is the initial launcher rather than an F8 switch.
+    pub startup: bool,
     /// Index into [`AiBackend::all`] of the currently highlighted entry.
     pub selected: usize,
 }
@@ -31,10 +33,17 @@ impl BackendSwitchState {
     /// Open the menu with the highlight on the currently active backend.
     pub fn open(&mut self, current: AiBackend) {
         self.visible = true;
+        self.startup = false;
         self.selected = AiBackend::all()
             .iter()
             .position(|b| *b == current)
             .unwrap_or(0);
+    }
+
+    /// Open as the initial launcher before any AI PTY has been spawned.
+    pub fn open_startup(&mut self, suggested: AiBackend) {
+        self.open(suggested);
+        self.startup = true;
     }
 
     /// Close the menu (cancel — no switch applied).
@@ -66,10 +75,11 @@ impl BackendSwitchState {
 /// Short, human-readable description shown next to each backend.
 fn backend_description(backend: AiBackend) -> &'static str {
     match backend {
-        AiBackend::Claude => "Anthropic Claude Code (permission/model/effort flags)",
+        AiBackend::Claude => "Claude Code · Permission, Model, Effort, Session",
         AiBackend::OpenCode => "OpenCode CLI",
-        AiBackend::Pi => "Pi CLI (by Inflection)",
+        AiBackend::Pi => "Pi coding agent CLI",
         AiBackend::Codex => "OpenAI Codex CLI",
+        AiBackend::Antigravity => "Google Antigravity CLI (agy)",
         AiBackend::OllamaOpenCode => "OpenCode via Ollama launch",
         AiBackend::OllamaPi => "Pi via Ollama launch",
     }
@@ -86,7 +96,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &BackendSwitchState, active:
 
     let backends = AiBackend::all();
 
-    let popup_width: u16 = 60;
+    let popup_width = area.width.saturating_sub(2).min(104);
     // title(2) + list(len) + footer(2) + borders(2)
     let popup_height: u16 = (backends.len() as u16 + 6).min(area.height.saturating_sub(2));
 
@@ -99,7 +109,11 @@ pub fn render(frame: &mut Frame, area: Rect, state: &BackendSwitchState, active:
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan))
-        .title(" Switch AI Backend (F8) ")
+        .title(if state.startup {
+            " Choose AI CLI "
+        } else {
+            " Switch AI Backend (F8) "
+        })
         .title_style(
             Style::default()
                 .fg(Color::Cyan)
@@ -143,13 +157,13 @@ pub fn render(frame: &mut Frame, area: Rect, state: &BackendSwitchState, active:
 
         let mut spans = vec![
             Span::styled(format!(" {} ", marker), marker_style),
-            Span::styled(format!("{:<9}", backend.short_label()), name_style),
+            Span::styled(format!("{:<14}", backend.short_label()), name_style),
             Span::styled(
                 backend_description(*backend),
                 Style::default().fg(Color::Gray),
             ),
         ];
-        if is_active {
+        if is_active && !state.startup {
             spans.push(Span::styled(
                 "  ← active",
                 Style::default()
@@ -168,12 +182,20 @@ pub fn render(frame: &mut Frame, area: Rect, state: &BackendSwitchState, active:
         ),
         Span::raw(" Select  "),
         Span::styled(" Enter ", Style::default().bg(Color::Cyan).fg(Color::Black)),
-        Span::raw(" Switch  "),
+        Span::raw(if state.startup {
+            " Continue  "
+        } else {
+            " Switch  "
+        }),
         Span::styled(
             " Esc ",
             Style::default().bg(Color::DarkGray).fg(Color::White),
         ),
-        Span::raw(" Cancel"),
+        Span::raw(if state.startup {
+            " Last used"
+        } else {
+            " Cancel"
+        }),
     ]);
     frame.render_widget(Paragraph::new(footer), chunks[2]);
 }
@@ -194,16 +216,27 @@ mod tests {
     }
 
     #[test]
+    fn startup_mode_is_distinct_from_runtime_switch() {
+        let mut state = BackendSwitchState::default();
+        state.open_startup(AiBackend::Codex);
+        assert!(state.startup);
+        state.open(AiBackend::Claude);
+        assert!(!state.startup);
+    }
+
+    #[test]
     fn next_wraps_forward() {
         let mut state = BackendSwitchState::default();
         state.open(AiBackend::Claude);
         assert_eq!(state.selected_backend(), AiBackend::Claude);
         state.next();
+        assert_eq!(state.selected_backend(), AiBackend::Codex);
+        state.next();
+        assert_eq!(state.selected_backend(), AiBackend::Antigravity);
+        state.next();
         assert_eq!(state.selected_backend(), AiBackend::OpenCode);
         state.next();
         assert_eq!(state.selected_backend(), AiBackend::Pi);
-        state.next();
-        assert_eq!(state.selected_backend(), AiBackend::Codex);
         state.next();
         assert_eq!(state.selected_backend(), AiBackend::OllamaOpenCode);
         state.next();

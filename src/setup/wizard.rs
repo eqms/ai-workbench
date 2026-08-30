@@ -65,6 +65,7 @@ pub enum WizardField {
     OpenCodePath,
     PiPath,
     CodexPath,
+    AntigravityPath,
     OllamaOpenCodePath,
     OllamaPiPath,
     LazygitPath,
@@ -84,6 +85,7 @@ pub struct WizardState {
     pub opencode_path: String,
     pub pi_path: String,
     pub codex_path: String,
+    pub antigravity_path: String,
     pub ollama_opencode_path: String,
     pub ollama_pi_path: String,
     pub lazygit_path: String,
@@ -97,7 +99,8 @@ pub struct WizardState {
     pub editing_field: Option<WizardField>,
     pub input_buffer: String,
 
-    // Current field focus (for ClaudeConfig step)
+    // Current focus within the Tool Configuration step.
+    pub backend_selector_focused: bool,
     pub focused_field: usize,
 
     /// Detected `cc-clip` binary on the remote host (`None` = not on PATH).
@@ -167,6 +170,12 @@ impl WizardState {
                 .as_ref()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|| "codex".to_string()),
+            antigravity_path: deps
+                .antigravity_cli
+                .path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "agy".to_string()),
             ollama_opencode_path: deps
                 .ollama_cli
                 .path
@@ -193,6 +202,7 @@ impl WizardState {
             },
             editing_field: None,
             input_buffer: String::new(),
+            backend_selector_focused: true,
             focused_field: 0,
             cc_clip_path: crate::clipboard::which("cc-clip"),
             ssh_image_paste_marked_configured: false,
@@ -219,11 +229,30 @@ impl WizardState {
     pub fn next_step(&mut self) {
         self.step = self.step.next();
         self.skip_inactive_step_forward();
+        if self.step == WizardStep::ClaudeConfig {
+            self.backend_selector_focused = true;
+        }
     }
 
     pub fn prev_step(&mut self) {
         self.step = self.step.prev();
         self.skip_inactive_step_backward();
+        if self.step == WizardStep::ClaudeConfig {
+            self.backend_selector_focused = true;
+        }
+    }
+
+    pub fn next_backend(&mut self) {
+        self.selected_backend = self.selected_backend.next();
+    }
+
+    pub fn prev_backend(&mut self) {
+        let backends = AiBackend::all();
+        let current = backends
+            .iter()
+            .position(|backend| *backend == self.selected_backend)
+            .unwrap_or(0);
+        self.selected_backend = backends[(current + backends.len() - 1) % backends.len()];
     }
 
     /// Total visible steps for the current session. The SSH step is hidden
@@ -286,6 +315,7 @@ impl WizardState {
             WizardField::OpenCodePath => self.opencode_path.clone(),
             WizardField::PiPath => self.pi_path.clone(),
             WizardField::CodexPath => self.codex_path.clone(),
+            WizardField::AntigravityPath => self.antigravity_path.clone(),
             WizardField::OllamaOpenCodePath => self.ollama_opencode_path.clone(),
             WizardField::OllamaPiPath => self.ollama_pi_path.clone(),
             WizardField::LazygitPath => self.lazygit_path.clone(),
@@ -305,6 +335,7 @@ impl WizardState {
                 WizardField::OpenCodePath => self.opencode_path = value,
                 WizardField::PiPath => self.pi_path = value,
                 WizardField::CodexPath => self.codex_path = value,
+                WizardField::AntigravityPath => self.antigravity_path = value,
                 WizardField::OllamaOpenCodePath => self.ollama_opencode_path = value,
                 WizardField::OllamaPiPath => self.ollama_pi_path = value,
                 WizardField::LazygitPath => self.lazygit_path = value,
@@ -347,6 +378,7 @@ impl WizardState {
         config.pty.opencode_command = vec![self.opencode_path.clone()];
         config.pty.pi_command = vec![self.pi_path.clone()];
         config.pty.codex_command = vec![self.codex_path.clone()];
+        config.pty.antigravity_command = vec![self.antigravity_path.clone()];
         config.pty.ollama_opencode_command = vec![
             self.ollama_opencode_path.clone(),
             "launch".to_string(),
@@ -408,6 +440,17 @@ mod tests {
         let state = WizardState::default();
         assert!(!state.visible);
         assert_eq!(state.step, WizardStep::Welcome);
+        assert!(state.backend_selector_focused);
+    }
+
+    #[test]
+    fn backend_radio_navigation_wraps() {
+        let mut state = WizardState::default();
+        state.selected_backend = AiBackend::Claude;
+        state.prev_backend();
+        assert_eq!(state.selected_backend, AiBackend::OllamaPi);
+        state.next_backend();
+        assert_eq!(state.selected_backend, AiBackend::Claude);
     }
 
     #[test]

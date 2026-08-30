@@ -306,7 +306,7 @@ impl App {
     /// (respawning the AI pane); Esc cancels without switching.
     pub(super) fn handle_backend_switch_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Esc => self.backend_switch.close(),
+            KeyCode::Esc => self.cancel_backend_switch(),
             KeyCode::Enter => {
                 let target = self.backend_switch.selected_backend();
                 self.backend_switch.close();
@@ -314,6 +314,55 @@ impl App {
             }
             KeyCode::F(8) | KeyCode::Down | KeyCode::Char('j') => self.backend_switch.next(),
             KeyCode::Up | KeyCode::Char('k') => self.backend_switch.prev(),
+            _ => {}
+        }
+    }
+
+    pub(super) fn handle_agent_startup_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Enter => {
+                let args = self.agent_startup.selected_args();
+                self.agent_startup.close();
+                self.init_agent_pty(args);
+            }
+            KeyCode::Esc => {
+                self.agent_startup.close();
+                self.init_agent_pty(Vec::new());
+            }
+            KeyCode::Tab => self.agent_startup.next_section(),
+            KeyCode::BackTab => self.agent_startup.prev_section(),
+            KeyCode::Left if self.agent_startup.is_text_field_active() => {
+                self.agent_startup.cursor_left()
+            }
+            KeyCode::Right if self.agent_startup.is_text_field_active() => {
+                self.agent_startup.cursor_right()
+            }
+            KeyCode::Home if self.agent_startup.is_text_field_active() => {
+                self.agent_startup.cursor_home()
+            }
+            KeyCode::End if self.agent_startup.is_text_field_active() => {
+                self.agent_startup.cursor_end()
+            }
+            KeyCode::Backspace if self.agent_startup.is_text_field_active() => {
+                self.agent_startup.backspace()
+            }
+            KeyCode::Delete if self.agent_startup.is_text_field_active() => {
+                self.agent_startup.delete()
+            }
+            KeyCode::Char(character)
+                if self.agent_startup.is_text_field_active()
+                    && !key
+                        .modifiers
+                        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                self.agent_startup.insert_char(character)
+            }
+            KeyCode::Left | KeyCode::Up | KeyCode::Char('h') | KeyCode::Char('k') => {
+                self.agent_startup.prev()
+            }
+            KeyCode::Right | KeyCode::Down | KeyCode::Char('l') | KeyCode::Char('j') => {
+                self.agent_startup.next()
+            }
             _ => {}
         }
     }

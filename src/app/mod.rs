@@ -109,6 +109,8 @@ pub struct App {
     pub claude_startup: ui::claude_startup::ClaudeStartupState,
     // Permission mode selection dialog
     pub permission_mode_dialog: ui::permission_mode::PermissionModeState,
+    // Backend-specific startup forms for Codex/OpenCode/Pi/Antigravity.
+    pub agent_startup: ui::agent_startup::AgentStartupState,
     // AI backend selection menu (F8)
     pub backend_switch: ui::backend_switch::BackendSwitchState,
     // Selected Claude permission mode
@@ -203,6 +205,7 @@ impl App {
         session: SessionState,
         fake_version: Option<String>,
         backend: AiBackend,
+        choose_backend_at_startup: bool,
     ) -> Self {
         let rows = 24;
         let cols = 80;
@@ -214,26 +217,45 @@ impl App {
         let mut claude_error: Option<String> = None;
         let mut claude_pty_pending = false;
         let mut permission_mode_dialog = ui::permission_mode::PermissionModeState::default();
+        let mut agent_startup = ui::agent_startup::AgentStartupState::default();
+        let mut backend_switch = ui::backend_switch::BackendSwitchState::default();
         let mut claude_permission_mode = ClaudePermissionMode::Default;
         // Determine if we should show permission mode dialog.
         // Only Claude understands permission/model/effort flags — OpenCode and Pi
         // start directly. Also skip if the wizard needs to run first (first-time setup).
-        let should_show_permission_dialog = backend.supports_claude_flags()
+        let should_show_permission_dialog = !choose_backend_at_startup
+            && backend.supports_claude_flags()
             && config.claude.show_permission_dialog
             && config.setup.wizard_completed;
+        let should_show_agent_dialog = !choose_backend_at_startup
+            && !backend.supports_claude_flags()
+            && config.setup.wizard_completed;
+        let should_wait_for_wizard = !config.setup.wizard_completed;
+
+        if choose_backend_at_startup && config.setup.wizard_completed {
+            backend_switch.open_startup(backend);
+        } else if should_show_agent_dialog {
+            agent_startup.open(backend);
+        }
 
         // 1. AI Pane - delayed init if permission dialog should be shown
         let claude_command_str;
-        if should_show_permission_dialog {
+        if should_show_permission_dialog
+            || should_show_agent_dialog
+            || should_wait_for_wizard
+            || (choose_backend_at_startup && config.setup.wizard_completed)
+        {
             // Delay Claude PTY creation until permission mode is selected
             claude_pty_pending = true;
-            permission_mode_dialog.open_with_defaults(
-                config.claude.default_permission_mode,
-                config.claude.default_model,
-                config.claude.default_effort,
-                &config.claude.default_session_name,
-                &config.claude.default_worktree,
-            );
+            if should_show_permission_dialog {
+                permission_mode_dialog.open_with_defaults(
+                    config.claude.default_permission_mode,
+                    config.claude.default_model,
+                    config.claude.default_effort,
+                    &config.claude.default_session_name,
+                    &config.claude.default_worktree,
+                );
+            }
             claude_command_str = String::new();
         } else {
             // Use configured default permission mode or Default
@@ -355,7 +377,8 @@ impl App {
             terminal_error,
             claude_startup: ui::claude_startup::ClaudeStartupState::default(),
             permission_mode_dialog,
-            backend_switch: ui::backend_switch::BackendSwitchState::default(),
+            agent_startup,
+            backend_switch,
             claude_permission_mode,
             claude_pty_pending,
             last_click_time: std::time::Instant::now(),

@@ -8,26 +8,34 @@
 [advisories]
 ignore = [
     # quick-xml — memory-exhaustion DoS in NsReader (RUSTSEC-2026-0195) and
-    # quadratic duplicate-attribute checking (RUSTSEC-2026-0194). Two paths, both
-    # unreachable:
+    # quadratic duplicate-attribute checking (RUSTSEC-2026-0194). Both are
+    # patched in quick-xml 0.41. As of the 30.08.2026 lockfile the tree holds
+    # two versions; only the first is still affected:
     #
-    #  1. quick-xml 0.38.4 via typst-library -> hayagriva -> citationberg, the CSL
-    #     bibliography parser. ai-workbench generates its own Typst source from
-    #     Markdown and never loads a user-supplied .csl; World::source() only
-    #     returns the generated document and World::file() is traversal-guarded
-    #     (src/browser/typst_pdf.rs).
-    #  2. quick-xml 0.39.4 via arboard -> wl-clipboard-rs -> wayland-scanner,
-    #     a proc-macro. It runs at build time over the Wayland protocol XML that
-    #     ships with the crate — no runtime exposure, Linux only.
+    #  1. quick-xml 0.38.4 via typst-library -> hayagriva -> citationberg, the
+    #     CSL bibliography parser — AFFECTED, but unreachable. ai-workbench
+    #     generates its own Typst source from Markdown and never loads a
+    #     user-supplied .csl; World::source() only returns the generated
+    #     document and World::file() is traversal-guarded
+    #     (src/browser/typst_pdf.rs). citationberg pins ^0.38, so this needs an
+    #     upstream release — `cargo update` cannot resolve it.
+    #  2. quick-xml 0.41.0 via syntect -> plist and via arboard ->
+    #     wl-clipboard-rs -> wayland-scanner — already patched, no longer a
+    #     reason for these ignores. wayland-scanner 0.31.11 moved off ^0.39;
+    #     earlier lockfiles pinned it to the vulnerable 0.39.4.
     #
-    # Not fixable via `cargo update`: citationberg pins ^0.38, wayland-scanner
-    # pins ^0.39. Both need upstream releases.
+    # Drop both entries once citationberg reaches quick-xml >= 0.41.
     "RUSTSEC-2026-0194",
     "RUSTSEC-2026-0195",
 ]
 
-# Unmaintained/yanked crates are reported as warnings, not failures, and are left
-# visible on purpose:
-#   serial 0.4.0     (portable-pty)  — unmaintained since 2017, worth watching
+# Unmaintained crates are reported as warnings, not failures, and are left
+# visible on purpose (state of the 30.08.2026 lockfile):
 #   bincode, yaml-rust (syntect)
-#   rustybuzz, ttf-parser, paste, spin (typst, dropped by --no-default-features)
+#   rustybuzz, ttf-parser, paste (typst, dropped by --no-default-features)
+#
+# Resolved by `cargo update` on 30.08.2026, listed so they are not re-added:
+#   serial (portable-pty) — no longer in the tree at all
+#   spin 0.9.8, chacha20 0.10.1 — were yanked, now on 0.9.9 / 0.10.2
+#   lru 0.18.1 (ratatui-core) — RUSTSEC-2026-0253 unsound, now on 0.18.3
+#   h2 0.4.15 (self_update -> reqwest) — RUSTSEC-2026-0258, now on 0.4.19

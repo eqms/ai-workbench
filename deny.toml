@@ -8,10 +8,11 @@ yanked = "warn"
 notice = "warn"
 
 # Kept in sync with .cargo/audit.toml — see that file for the full reachability
-# analysis. Both entries are quick-xml DoS advisories reached only through
-# typst's CSL bibliography parser (never fed user input) and through the
-# build-time wayland-scanner proc-macro. Neither is fixable via `cargo update`:
-# citationberg pins ^0.38, wayland-scanner pins ^0.39.
+# analysis. Both entries are quick-xml DoS advisories. Since the 30.08.2026
+# `cargo update` only ONE affected path remains: quick-xml 0.38.4 through
+# typst's CSL bibliography parser, which is never fed user input. citationberg
+# pins ^0.38, so `cargo update` cannot resolve it. The formerly listed
+# wayland-scanner path now resolves to the patched quick-xml 0.41.
 ignore = [
     "RUSTSEC-2026-0194",  # quick-xml: quadratic duplicate-attribute check
     "RUSTSEC-2026-0195",  # quick-xml: unbounded namespace allocation (DoS)
@@ -32,28 +33,36 @@ skip = [
     # bitflags 1.x (legacy transitive dep) vs 2.x (modern)
     { name = "bitflags", version = "=1.3.2" },
 
-    # windows-sys: multiple versions pulled by different transitive deps (nix, rustix, tokio, etc.)
-    { name = "windows-sys", version = "=0.48.0" },
+    # windows-*: multiple versions pulled by different transitive deps (nix,
+    # rustix, tokio, etc.). Never built here — the project targets Linux and
+    # macOS — but cargo-deny checks all targets, so the duplicates surface.
+    # Regenerated from Cargo.lock on 30.08.2026; the 0.48.x line dropped out of
+    # the tree entirely and 0.53.x/0.61.x came in. If keeping this list in sync
+    # after every `cargo update` becomes tedious, drop the `version` field and
+    # skip these crates wholesale.
+    { name = "windows-link", version = "=0.2.1" },
     { name = "windows-sys", version = "=0.52.0" },
     { name = "windows-sys", version = "=0.59.0" },
     { name = "windows-sys", version = "=0.60.2" },
-    { name = "windows-targets", version = "=0.48.5" },
+    { name = "windows-sys", version = "=0.61.2" },
     { name = "windows-targets", version = "=0.52.6" },
-    { name = "windows_aarch64_gnullvm", version = "=0.48.5" },
+    { name = "windows-targets", version = "=0.53.5" },
     { name = "windows_aarch64_gnullvm", version = "=0.52.6" },
-    { name = "windows_aarch64_msvc", version = "=0.48.5" },
+    { name = "windows_aarch64_gnullvm", version = "=0.53.1" },
     { name = "windows_aarch64_msvc", version = "=0.52.6" },
-    { name = "windows_i686_gnu", version = "=0.48.5" },
+    { name = "windows_aarch64_msvc", version = "=0.53.1" },
     { name = "windows_i686_gnu", version = "=0.52.6" },
+    { name = "windows_i686_gnu", version = "=0.53.1" },
     { name = "windows_i686_gnullvm", version = "=0.52.6" },
-    { name = "windows_i686_msvc", version = "=0.48.5" },
+    { name = "windows_i686_gnullvm", version = "=0.53.1" },
     { name = "windows_i686_msvc", version = "=0.52.6" },
-    { name = "windows_x86_64_gnu", version = "=0.48.5" },
+    { name = "windows_i686_msvc", version = "=0.53.1" },
     { name = "windows_x86_64_gnu", version = "=0.52.6" },
-    { name = "windows_x86_64_gnullvm", version = "=0.48.5" },
+    { name = "windows_x86_64_gnu", version = "=0.53.1" },
     { name = "windows_x86_64_gnullvm", version = "=0.52.6" },
-    { name = "windows_x86_64_msvc", version = "=0.48.5" },
+    { name = "windows_x86_64_gnullvm", version = "=0.53.1" },
     { name = "windows_x86_64_msvc", version = "=0.52.6" },
+    { name = "windows_x86_64_msvc", version = "=0.53.1" },
 
     # Remaining ecosystem churn — typst + ICU + syntect + various transitive deps
     # all at "warn" level (multiple-versions = "warn"), not hard "deny"

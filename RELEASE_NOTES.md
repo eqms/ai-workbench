@@ -1,5 +1,40 @@
 # Release Notes
 
+## Version 1.13.0 (30.08.2026)
+
+### Added
+
+- **[ADD] Interactive AI CLI launcher and backend-specific welcome screens.**
+  Starting without a positional backend now opens a chooser before any AI PTY
+  is spawned. Claude keeps its structured permission/model/effort screen;
+  Codex, OpenCode, Pi and the new Antigravity (`agy`) backend offer wide,
+  Claude-style forms with Tab-selectable CLI-specific sections and editable
+  model/agent fields. Runtime switching with F8 uses the same flow, dangerous
+  options are visibly marked, command paths remain editable in Settings, and
+  existing config files migrate through Serde defaults.
+
+### Fixed
+
+- **[FIX] Dismissing the initial CLI chooser with the mouse no longer leaves
+  the AI pane without a terminal.** The chooser deliberately delays spawning
+  the AI PTY until a backend is picked. Pressing `Esc` handled that correctly —
+  it applied the configured backend and started the process — but clicking
+  outside the menu only closed it, so the pane stayed empty for the rest of the
+  session and no keystroke could bring it back. Both input paths now go through
+  one shared cancel routine, so they cannot drift apart again; cancelling an F8
+  switch still just closes the menu, since a terminal already exists in that
+  case.
+
+### Changed
+
+- **[CHG] Dependencies refreshed; one advisory closed.** `h2` was two weeks
+  behind a denial-of-service advisory (RUSTSEC-2026-0258), reachable only
+  through the update check. The refresh also clears an unsound `lru` release
+  and two yanked crates, and drops the vulnerable `quick-xml` copy that the
+  clipboard stack pulled in. `cargo audit` reports no vulnerabilities. The
+  ignore rationales in `.cargo/audit.toml` and `deny.toml` were corrected to
+  match the one path that genuinely remains.
+
 ## Version 1.12.1 (27.08.2026)
 
 ### Fixed

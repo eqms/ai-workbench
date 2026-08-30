@@ -26,10 +26,12 @@
 | F5 | Toggle LazyGit (restarts in current directory) |
 | F6 | Toggle User Terminal (syncs to current directory) |
 | F7 | Claude Settings (~/.claude) |
-| F8 | Open the AI backend menu — a modal lists Claude / OpenCode / Pi / Codex / Ollama OpenCode / Ollama Pi with the active one marked. F8 or ↑↓/j k move the highlight, Enter switches (respawns the AI pane), Esc cancels |
+| F8 | Open the AI backend menu — Claude / Codex / Antigravity / OpenCode / Pi / Ollama variants. F8 or ↑↓/j k moves the highlight, Enter opens that CLI's startup screen and respawns the AI pane, Esc cancels |
 | Shift+F8 | Settings |
 | F9 | File Menu (File Browser) / Copy last command block (Terminal) or last N lines (Claude, LazyGit) |
 | Shift+F9 | Copy last N lines with interactive count input (Terminal panes) |
+
+In a backend startup screen, `Tab` / `Shift+Tab` changes the section, arrow keys change the selected option, and text can be entered directly in Model or Agent sections. `Enter` starts with the displayed selections; `Esc` starts with configured defaults.
 
 #### Settings / Input Dialogs (when editing a text field)
 | Key | Action |
@@ -473,13 +475,15 @@ Please attach the file when reporting a problem.
 | F5 | LazyGit umschalten (startet im aktuellen Verzeichnis neu) |
 | F6 | Benutzer-Terminal umschalten (wechselt ins aktuelle Verzeichnis) |
 | F7 | Claude Einstellungen (~/.claude) |
-| F8 | KI-Backend-Menü öffnen — ein Dialog listet Claude / OpenCode / Pi / Codex / Ollama OpenCode / Ollama Pi, das aktive ist markiert. F8 oder ↑↓/j k bewegen die Auswahl, Enter wechselt (startet den KI-Bereich neu), Esc bricht ab |
+| F8 | KI-Backend-Menü öffnen — Claude / Codex / Antigravity / OpenCode / Pi / Ollama-Varianten. F8 oder ↑↓/j k bewegen die Auswahl, Enter öffnet den passenden Startdialog und startet den KI-Bereich neu, Esc bricht ab |
 | Shift+F8 | Einstellungen |
 | F9 | Datei-Menü (Dateibrowser) / Letzten Kommando-Block (Terminal) bzw. letzte N Zeilen (Claude, LazyGit) kopieren |
 | Shift+F9 | Letzte N Zeilen mit interaktiver Eingabe kopieren (Terminal-Bereiche) |
 | F10 | Über |
 | F12 | Hilfe |
 | Esc | Dialoge/Hilfe schließen |
+
+In einem Backend-Startdialog wechseln `Tab` / `Shift+Tab` die Sektion, die Pfeiltasten ändern die Auswahl und in Modell- oder Agent-Sektionen kann direkt Text eingegeben werden. `Enter` startet mit den angezeigten Optionen; `Esc` verwendet die konfigurierten Standardwerte.
 
 #### Einstellungen / Eingabedialoge (bei Bearbeitung eines Textfelds)
 | Taste | Aktion |

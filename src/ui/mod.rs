@@ -1,4 +1,5 @@
 pub mod about;
+pub mod agent_startup;
 pub mod backend_switch;
 pub mod boot_screen;
 pub mod claude_startup;

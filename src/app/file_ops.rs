@@ -840,6 +840,18 @@ impl App {
                     self.wizard.next_step();
                 }
             }
+            KeyCode::Right
+                if self.wizard.step == WizardStep::ClaudeConfig
+                    && self.wizard.backend_selector_focused =>
+            {
+                self.wizard.next_backend();
+            }
+            KeyCode::Left
+                if self.wizard.step == WizardStep::ClaudeConfig
+                    && self.wizard.backend_selector_focused =>
+            {
+                self.wizard.prev_backend();
+            }
             KeyCode::Tab | KeyCode::Right => {
                 if self.wizard.can_proceed() {
                     self.wizard.next_step();
@@ -854,8 +866,12 @@ impl App {
                         self.wizard.selected_shell_idx -= 1;
                     }
                 }
-                WizardStep::ClaudeConfig if self.wizard.focused_field > 0 => {
-                    self.wizard.focused_field -= 1;
+                WizardStep::ClaudeConfig if !self.wizard.backend_selector_focused => {
+                    if self.wizard.focused_field == 0 {
+                        self.wizard.backend_selector_focused = true;
+                    } else {
+                        self.wizard.focused_field -= 1;
+                    }
                 }
                 _ => {}
             },
@@ -867,45 +883,33 @@ impl App {
                         self.wizard.selected_shell_idx += 1;
                     }
                 }
-                WizardStep::ClaudeConfig if self.wizard.focused_field < 6 => {
+                WizardStep::ClaudeConfig if self.wizard.backend_selector_focused => {
+                    self.wizard.backend_selector_focused = false;
+                    self.wizard.focused_field = 0;
+                }
+                WizardStep::ClaudeConfig if self.wizard.focused_field < 7 => {
                     self.wizard.focused_field += 1;
                 }
                 _ => {}
             },
             KeyCode::Char('e') | KeyCode::Char('E') => {
                 // Edit the focused CLI path in the Tool Configuration step.
-                if self.wizard.step == WizardStep::ClaudeConfig {
+                if self.wizard.step == WizardStep::ClaudeConfig
+                    && !self.wizard.backend_selector_focused
+                {
                     use crate::setup::wizard::WizardField;
                     let field = match self.wizard.focused_field {
                         0 => WizardField::ClaudePath,
                         1 => WizardField::OpenCodePath,
                         2 => WizardField::PiPath,
                         3 => WizardField::CodexPath,
-                        4 => WizardField::OllamaOpenCodePath,
-                        5 => WizardField::OllamaPiPath,
+                        4 => WizardField::AntigravityPath,
+                        5 => WizardField::OllamaOpenCodePath,
+                        6 => WizardField::OllamaPiPath,
                         _ => WizardField::LazygitPath,
                     };
                     self.wizard.start_editing(field);
                 }
-            }
-            KeyCode::Char('1')
-            | KeyCode::Char('2')
-            | KeyCode::Char('3')
-            | KeyCode::Char('4')
-            | KeyCode::Char('5')
-            | KeyCode::Char('6')
-                if self.wizard.step == WizardStep::ClaudeConfig =>
-            {
-                // Choose the default AI backend for argument-less launches.
-                use crate::backend::AiBackend;
-                self.wizard.selected_backend = match code {
-                    KeyCode::Char('1') => AiBackend::Claude,
-                    KeyCode::Char('2') => AiBackend::OpenCode,
-                    KeyCode::Char('3') => AiBackend::Pi,
-                    KeyCode::Char('4') => AiBackend::Codex,
-                    KeyCode::Char('5') => AiBackend::OllamaOpenCode,
-                    _ => AiBackend::OllamaPi,
-                };
             }
             KeyCode::Char('m') | KeyCode::Char('M')
                 if self.wizard.step == WizardStep::SshImagePaste =>

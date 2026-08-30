@@ -1,9 +1,9 @@
 [package]
 name = "ai-workbench"
-version = "1.12.1"
+version = "1.13.0"
 edition = "2021"
 rust-version = "1.85"
-description = "A Rust TUI multiplexer for AI coding agents (Claude, OpenCode, Pi) with file browser, preview and embedded PTY panes"
+description = "A Rust TUI multiplexer for AI coding agents (Claude, Codex, Antigravity, OpenCode, Pi) with file browser, preview and embedded PTY panes"
 repository = "https://github.com/eqms/ai-workbench"
 license = "MIT"
 

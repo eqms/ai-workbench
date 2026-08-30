@@ -31,9 +31,9 @@ use update::{perform_update_to_version_sync, UpdateResult};
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// AI backend for the primary pane: `claude`, `opencode`, `pi`,
-    /// `codex`, `ollama-opencode`, or `ollama-pi` (case-insensitive). When
-    /// omitted, the last-used backend is resumed (default on first run: claude).
+    /// AI backend for the primary pane: `claude`, `codex`, `antigravity`,
+    /// `opencode`, `pi`, `ollama-opencode`, or `ollama-pi` (case-insensitive). When
+    /// omitted, an interactive CLI chooser opens (highlighting the last-used backend).
     #[arg(value_name = "BACKEND")]
     mode: Option<String>,
 
@@ -635,7 +635,7 @@ fn main() -> Result<()> {
     if let Some(mode) = &args.mode {
         if AiBackend::parse(mode).is_none() {
             eprintln!(
-                "Error: unknown backend '{mode}'. Valid: claude, opencode, pi, codex, ollama-opencode, ollama-pi"
+                "Error: unknown backend '{mode}'. Valid: claude, codex, antigravity, opencode, pi, ollama-opencode, ollama-pi"
             );
             std::process::exit(2);
         }
@@ -705,6 +705,7 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
     // Resolve the active backend: explicit CLI argument wins, otherwise resume
     // the last-used backend from the session (default: Claude). The argument was
     // already validated in `main()`, so `parse` failing here means "not given".
+    let choose_backend_at_startup = mode.is_none();
     let backend = mode
         .as_deref()
         .and_then(AiBackend::parse)
@@ -793,7 +794,13 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
     })?;
 
     let t_new = std::time::Instant::now();
-    let app = App::new(config, session, fake_version, backend);
+    let app = App::new(
+        config,
+        session,
+        fake_version,
+        backend,
+        choose_backend_at_startup,
+    );
     update::log_update(&format!("App::new took {} ms", t_new.elapsed().as_millis()));
 
     let restart_requested = app.run(terminal);

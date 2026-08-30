@@ -103,6 +103,7 @@ impl App {
         // while a Claude permission/startup overlay is up so those keep control.
         if self.active_pane == PaneId::Terminal
             && !self.permission_mode_dialog.visible
+            && !self.agent_startup.visible
             && !self.claude_startup.visible
             && !self.backend_switch.visible
         {
@@ -118,6 +119,13 @@ impl App {
         // selection instead of re-opening the menu (Esc cancels without switch).
         if self.backend_switch.visible {
             self.handle_backend_switch_key(key);
+            return;
+        }
+
+        // Backend-specific startup form. No AI PTY exists until this modal is
+        // confirmed (or Esc starts the backend with configured defaults).
+        if self.agent_startup.visible {
+            self.handle_agent_startup_key(key);
             return;
         }
 

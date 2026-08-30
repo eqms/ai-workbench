@@ -13,7 +13,7 @@
 
 A Rust-based TUI (Terminal User Interface) multiplexer designed for AI-assisted development workflows. Provides an integrated development environment with file browser, syntax-highlighted preview pane, and multiple embedded PTY terminals.
 
-The primary (AI) pane is **backend-selectable** — launch it with Claude Code, OpenCode, Pi, or Codex via a single startup argument (`ai-workbench claude|opencode|pi|codex`). The chosen backend is remembered across runs; every other pane stays identical.
+The primary (AI) pane is **backend-selectable**. Starting `ai-workbench` opens a CLI chooser for Claude Code, Codex, Antigravity, OpenCode, Pi and the Ollama variants; a positional argument remains available for scripted launches. Every other pane stays identical.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)
@@ -48,7 +48,7 @@ No overhead. Maximum performance. Built by a developer, for developers.
 |------|-----|-------------|
 | **File Browser** | F1 | Navigate directories, git status integration, file operations (F9), toggle visibility |
 | **Preview** | F2 | Syntax highlighting (500+ languages), Markdown rendering, built-in editor |
-| **AI Agent** | F4 | Embedded AI CLI — Claude Code, OpenCode, Pi, or Codex (selected at launch); Claude mode adds startup prefixes |
+| **AI Agent** | F4 | Embedded AI CLI — Claude Code, Codex, Antigravity, OpenCode, or Pi (selected at launch) |
 | **LazyGit** | F5 | Integrated Git TUI (restarts in current directory) |
 | **Terminal** | F6 | General-purpose shell (syncs to current directory) |
 
@@ -61,24 +61,27 @@ ai-workbench claude            # Anthropic Claude Code CLI (default)
 ai-workbench opencode          # OpenCode CLI
 ai-workbench pi                # Pi CLI
 ai-workbench codex             # OpenAI Codex CLI
+ai-workbench antigravity       # Google Antigravity CLI (agy)
 ai-workbench ollama-opencode   # OpenCode via Ollama launch
 ai-workbench ollama-pi         # Pi via Ollama launch
 ```
 
 - The backend name is case-insensitive; an unknown value exits with an error.
-- Without an argument, the **last-used backend is resumed** (first-run default: `claude`), persisted to `~/.config/ai-workbench/session.yaml`.
-- **Switch the backend at runtime with `F8`** — a menu lists Claude / OpenCode / Pi / Codex / Ollama OpenCode / Ollama Pi, respawns the AI pane on switch, and persists the choice. (`Shift+F8` opens Settings.)
-- Each backend's command is configurable via `pty.claude_command` / `pty.opencode_command` / `pty.pi_command` / `pty.codex_command` / `pty.ollama_opencode_command` / `pty.ollama_pi_command`. The **OpenCode**, **Pi**, **Codex**, and the two **Ollama** variants take a full command line with arguments — e.g. `opencode --model glm-5.2:cloud`, `codex -s workspace-write`, or `ollama launch opencode --model kimi-k2.7-code:cloud` — and are editable in **Settings (Shift+F8) → Paths** as well as in `config.yaml`:
+- Without an argument, a startup menu opens with the last-used backend highlighted. The AI process is spawned only after confirmation.
+- After selection, each CLI gets a wide, sectioned welcome screen. `Tab` changes section, arrow keys change the active option, and model/agent fields accept direct input. The available sections reflect the CLI: Codex sandbox/approval/search, OpenCode session/interface/approval, Pi session/thinking/tools/network, and Antigravity mode/model/agent/effort/session.
+- **Switch the backend at runtime with `F8`** — the same menu lists all backends, respawns the AI pane on switch, and persists the choice. (`Shift+F8` opens Settings.)
+- Each backend's command is configurable in **Settings (Shift+F8) → Paths** and `config.yaml`, including `pty.antigravity_command` (default `agy`):
   ```yaml
   pty:
     opencode_command: ["opencode", "--model", "glm-5.2:cloud"]
     pi_command: ["pi"]
     codex_command: ["codex", "-s", "workspace-write"]
+    antigravity_command: ["agy"]
     ollama_opencode_command: ["ollama", "launch", "opencode", "--model", "kimi-k2.7-code:cloud"]
     ollama_pi_command: ["ollama", "launch", "pi", "--model", "qwen3.5:cloud"]
   ```
-- Claude-specific flags (permission mode, model, effort, session, worktree) and the permission/startup dialogs apply **only** in Claude mode. The Model options `Fable`/`Opus`/`Sonnet`/`Haiku` map to the CLI `--model` aliases (always newest of each tier). Codex starts directly — pass its flags (`-s`, `-a`, `-m`, `--search`) via `pty.codex_command`.
-- The first-run wizard checks all four CLIs, lets you set each path, and pick the default backend.
+- Startup selections affect only the current invocation; configured command arguments remain authoritative. Dangerous no-approval options are highlighted in red.
+- The first-run wizard checks all five primary CLIs, lets you set each path, and pick the suggested backend.
 
 **Highlights:**
 - Full PTY emulation with 256-color support and 1000-line scrollback
@@ -250,7 +253,7 @@ Kein Overhead. Maximale Performance. Von einem Entwickler, für Entwickler.
 |---------|-------|--------------|
 | **Dateibrowser** | F1 | Verzeichnisnavigation, Git-Status-Integration, Dateioperationen (F9), ein-/ausblenden |
 | **Vorschau** | F2 | Syntax-Hervorhebung (500+ Sprachen), Markdown-Rendering, Editor |
-| **AI-Agent** | F4 | Eingebettetes AI-CLI — Claude Code, OpenCode oder Pi (beim Start gewählt); im Claude-Modus mit Startup-Präfixen |
+| **AI-Agent** | F4 | Eingebettetes AI-CLI — Claude Code, Codex, Antigravity, OpenCode oder Pi (beim Start gewählt) |
 | **LazyGit** | F5 | Integrierte Git-TUI (startet im aktuellen Verzeichnis neu) |
 | **Terminal** | F6 | Allgemeines Shell-Terminal (wechselt ins aktuelle Verzeichnis) |
 
@@ -263,21 +266,23 @@ ai-workbench claude            # Anthropic Claude Code CLI (Standard)
 ai-workbench opencode          # OpenCode CLI
 ai-workbench pi                # Pi CLI
 ai-workbench codex             # OpenAI Codex CLI
+ai-workbench antigravity       # Google Antigravity CLI (agy)
 ai-workbench ollama-opencode   # OpenCode via Ollama launch
 ai-workbench ollama-pi         # Pi via Ollama launch
 ```
 
 - Der Backend-Name ist case-insensitiv; ein unbekannter Wert beendet mit Fehler.
-- Ohne Parameter wird das **zuletzt genutzte Backend fortgesetzt** (Standard beim ersten Start: `claude`), gespeichert in `~/.config/ai-workbench/session.yaml`.
-- **Backend-Wechsel zur Laufzeit mit `F8`** — ein Menü listet Claude / OpenCode / Pi / Codex / Ollama OpenCode / Ollama Pi, der Wechsel startet den KI-Bereich neu und wird persistiert. (`Shift+F8` öffnet die Settings.)
-- Jedes Backend-Kommando ist über `pty.claude_command` / `pty.opencode_command` / `pty.pi_command` / `pty.codex_command` / `pty.ollama_opencode_command` / `pty.ollama_pi_command` konfigurierbar, editierbar auch in **Settings (Shift+F8) → Paths**. Beispiel Ollama:
+- Ohne Parameter öffnet sich zuerst die CLI-Auswahl; das zuletzt verwendete Backend ist vorselektiert. Erst nach Bestätigung wird der AI-Prozess gestartet.
+- Danach erscheint ein breiter, gegliederter Begrüßungsdialog. `Tab` wechselt die Sektion, die Pfeiltasten ändern die aktive Option und Modell-/Agent-Felder sind direkt editierbar. Die Sektionen bilden die jeweilige CLI ab: Codex Sandbox/Approval/Suche, OpenCode Session/Interface/Approval, Pi Session/Thinking/Tools/Netzwerk sowie Antigravity Modus/Modell/Agent/Effort/Session.
+- **Backend-Wechsel zur Laufzeit mit `F8`** nutzt dasselbe Menü, startet den KI-Bereich neu und persistiert die Auswahl. (`Shift+F8` öffnet die Settings.)
+- Jedes Backend-Kommando ist in **Settings (Shift+F8) → Paths** konfigurierbar; Antigravity nutzt standardmäßig `pty.antigravity_command: ["agy"]`.
   ```yaml
   pty:
     ollama_opencode_command: ["ollama", "launch", "opencode", "--model", "kimi-k2.7-code:cloud"]
     ollama_pi_command: ["ollama", "launch", "pi", "--model", "qwen3.5:cloud"]
   ```
-- Claude-spezifische Flags (Permission-Mode, Model, Effort, Session, Worktree, Remote-Control) sowie die Permission-/Startup-Dialoge greifen **nur** im Claude-Modus. Codex startet direkt — eigene Flags (`-s`, `-a`, `-m`, `--search`) über `pty.codex_command`.
-- Der Ersteinrichtungs-Assistent prüft alle vier CLIs, lässt jeden Pfad setzen und das Standard-Backend wählen.
+- Die Startauswahl gilt nur für den aktuellen Aufruf; dauerhaft konfigurierte Kommandoargumente bleiben maßgeblich. Gefährliche Optionen ohne Sicherheitsabfragen sind rot markiert.
+- Der Ersteinrichtungs-Assistent prüft alle fünf primären CLIs, lässt jeden Pfad setzen und das vorgeschlagene Backend wählen.
 
 **Highlights:**
 - Volle PTY-Emulation mit 256-Farben und 1000 Zeilen Scrollback

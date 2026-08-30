@@ -84,6 +84,19 @@ impl App {
         cmd
     }
 
+    pub(super) fn build_agent_command(
+        config: &Config,
+        backend: AiBackend,
+        extra_args: &[String],
+    ) -> Vec<String> {
+        let has_backend_command = !config.pty.command_for(backend).is_empty();
+        let mut command = Self::build_ai_command(config, backend, &StartupOptions::default());
+        if has_backend_command {
+            command.extend(extra_args.iter().cloned());
+        }
+        command
+    }
+
     /// Initialize Claude PTY with the given startup options
     pub(super) fn init_claude_pty(&mut self, opts: StartupOptions) {
         self.claude_permission_mode = opts.permission_mode;
@@ -110,6 +123,30 @@ impl App {
         }
     }
 
+    /// Initialize a non-Claude AI PTY with arguments selected in its startup
+    /// form. The configured command remains authoritative; form arguments are
+    /// appended for this invocation only and are not persisted into config.
+    pub(super) fn init_agent_pty(&mut self, extra_args: Vec<String>) {
+        self.claude_pty_pending = false;
+        let command = Self::build_agent_command(&self.config, self.backend, &extra_args);
+        self.claude_command_used = command.join(" ");
+
+        let cwd = self.file_browser.current_dir.clone();
+        match PseudoTerminal::new(&command, 24, 80, &cwd) {
+            Ok(pty) => {
+                self.terminals.insert(PaneId::Claude, pty);
+                self.claude_error = None;
+            }
+            Err(error) => {
+                self.claude_error = Some(format!(
+                    "Failed to start shell\n\nCommand: {}\n\nError: {}",
+                    self.claude_command_used, error
+                ));
+            }
+        }
+        self.active_pane = PaneId::Claude;
+    }
+
     /// Initialize Claude PTY after wizard completion
     /// Shows permission mode dialog if configured, otherwise starts Claude directly
     pub(super) fn init_claude_after_wizard(&mut self) {
@@ -129,7 +166,7 @@ impl App {
                 &self.config.claude.default_session_name,
                 &self.config.claude.default_worktree,
             );
-        } else {
+        } else if self.backend.supports_claude_flags() {
             let opts = StartupOptions {
                 permission_mode: self
                     .config
@@ -143,6 +180,9 @@ impl App {
             };
             self.init_claude_pty(opts);
             self.active_pane = PaneId::Claude;
+        } else {
+            self.claude_pty_pending = true;
+            self.agent_startup.open(self.backend);
         }
     }
 
@@ -152,8 +192,7 @@ impl App {
     /// backend still respawns the pane (acts as a restart). The respawn reuses
     /// [`Self::init_claude_after_wizard`], which shows the Claude startup dialog
     /// only when switching to Claude with `show_permission_dialog` enabled, and
-    /// otherwise starts the backend CLI directly (OpenCode/Pi get their args
-    /// from `config.pty.*_command`).
+    /// otherwise opens the selected backend's sectioned startup dialog.
     pub(super) fn apply_ai_backend(&mut self, target: crate::backend::AiBackend) {
         self.backend = target;
         self.session.last_backend = target;
@@ -164,6 +203,29 @@ impl App {
         // Footer confirmation (reuses the 2 s copy-flash channel).
         self.copy_flash_message = Some(format!("Backend: {}", target.short_label()));
         self.last_copy_time = Some(std::time::Instant::now());
+    }
+
+    /// Cancel the backend-selection menu, whatever the input path — `Esc` or a
+    /// click outside the menu.
+    ///
+    /// Cancelling an F8 switch is nothing but closing the menu. Cancelling the
+    /// *initial* launcher is not: no AI PTY has been spawned at that point
+    /// (`App::new` deliberately waits for the chooser), so merely closing the
+    /// menu leaves the AI pane without a terminal for the rest of the session.
+    /// The startup cancel therefore still applies the current backend — the
+    /// same "cancel means keep what was configured" semantics the permission
+    /// dialog uses.
+    ///
+    /// Keyboard and mouse must call *this*, never `backend_switch.close()`
+    /// directly: the two paths drifted apart once already, and only the
+    /// keyboard side carried the startup branch.
+    pub(super) fn cancel_backend_switch(&mut self) {
+        let was_startup = self.backend_switch.startup;
+        let target = self.backend;
+        self.backend_switch.close();
+        if was_startup {
+            self.apply_ai_backend(target);
+        }
     }
 
     /// Sync directory to Terminal pane only (not Claude - Claude only gets cd at startup)
@@ -634,6 +696,31 @@ mod tests {
         assert!(!cmd.iter().any(|a| a == "--permission-mode"));
         assert!(!cmd.iter().any(|a| a == "--model"));
         assert!(!cmd.iter().any(|a| a == "--effort"));
+    }
+
+    #[test]
+    fn test_antigravity_backend_uses_agy_command() {
+        let cfg = Config::default();
+        let cmd = App::build_ai_command(&cfg, AiBackend::Antigravity, &base_opts());
+        assert_eq!(cmd, ["agy"]);
+    }
+
+    #[test]
+    fn test_agent_profile_args_are_appended_for_one_invocation() {
+        let cfg = Config::default();
+        let args = vec!["--sandbox".to_string(), "read-only".to_string()];
+        let cmd = App::build_agent_command(&cfg, AiBackend::Codex, &args);
+        assert_eq!(cmd, ["codex", "--sandbox", "read-only"]);
+        assert_eq!(cfg.pty.codex_command, ["codex"]);
+    }
+
+    #[test]
+    fn test_profile_args_do_not_leak_into_shell_fallback() {
+        let mut cfg = Config::default();
+        cfg.pty.pi_command.clear();
+        let cmd = App::build_agent_command(&cfg, AiBackend::Pi, &["--continue".to_string()]);
+        assert_eq!(cmd[0], cfg.terminal.shell_path);
+        assert!(!cmd.iter().any(|arg| arg == "--continue"));
     }
 
     #[test]

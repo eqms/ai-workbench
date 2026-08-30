@@ -48,6 +48,7 @@ pub struct DependencyReport {
     pub opencode_cli: DependencyStatus,
     pub pi_cli: DependencyStatus,
     pub codex_cli: DependencyStatus,
+    pub antigravity_cli: DependencyStatus,
     pub ollama_cli: DependencyStatus,
     pub lazygit: DependencyStatus,
     pub shells: Vec<DependencyStatus>,
@@ -63,6 +64,7 @@ impl DependencyReport {
             opencode_cli: check_command("opencode", &["--version"], false),
             pi_cli: check_command("pi", &["--version"], false),
             codex_cli: check_command("codex", &["--version"], false),
+            antigravity_cli: check_command("agy", &["--version"], false),
             ollama_cli: check_command("ollama", &["--version"], false),
             lazygit: check_command("lazygit", &["--version"], false),
             shells: check_available_shells(),
@@ -100,6 +102,7 @@ impl DependencyReport {
             AiBackend::OpenCode => &self.opencode_cli,
             AiBackend::Pi => &self.pi_cli,
             AiBackend::Codex => &self.codex_cli,
+            AiBackend::Antigravity => &self.antigravity_cli,
             AiBackend::OllamaOpenCode | AiBackend::OllamaPi => &self.ollama_cli,
         }
     }

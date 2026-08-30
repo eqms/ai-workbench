@@ -12,9 +12,10 @@ use crate::setup::wizard::{WizardField, WizardState, WizardStep};
 
 /// Render the installation wizard
 pub fn render(frame: &mut Frame, area: Rect, state: &WizardState) {
-    // Calculate centered popup area (70% width, 80% height)
-    let popup_width = (area.width as f32 * 0.7) as u16;
-    let popup_height = (area.height as f32 * 0.8) as u16;
+    // Use the available terminal instead of shrinking a content-heavy wizard
+    // to a percentage. The cap keeps it readable on very large displays.
+    let popup_width = area.width.saturating_sub(2).min(110);
+    let popup_height = area.height.saturating_sub(2).min(36);
 
     let popup_x = (area.width.saturating_sub(popup_width)) / 2;
     let popup_y = (area.height.saturating_sub(popup_height)) / 2;
@@ -312,14 +313,15 @@ fn render_claude_config(frame: &mut Frame, area: Rect, state: &WizardState) {
 
     let chunks = Layout::vertical([
         Constraint::Length(1), // header
-        Constraint::Length(2), // backend selector
-        Constraint::Length(3), // Claude path
-        Constraint::Length(3), // OpenCode path
-        Constraint::Length(3), // Pi path
-        Constraint::Length(3), // Codex path
-        Constraint::Length(3), // Ollama OpenCode path
-        Constraint::Length(3), // Ollama Pi path
-        Constraint::Length(3), // LazyGit path
+        Constraint::Length(3), // backend selector
+        Constraint::Length(2), // Claude path
+        Constraint::Length(2), // OpenCode path
+        Constraint::Length(2), // Pi path
+        Constraint::Length(2), // Codex path
+        Constraint::Length(2), // Antigravity path
+        Constraint::Length(2), // Ollama OpenCode path
+        Constraint::Length(2), // Ollama Pi path
+        Constraint::Length(2), // LazyGit path
         Constraint::Min(1),    // hint
     ])
     .split(area);
@@ -329,45 +331,64 @@ fn render_claude_config(frame: &mut Frame, area: Rect, state: &WizardState) {
     frame.render_widget(header, chunks[0]);
 
     // Default-backend selector line
-    let mut selector_spans = vec![Span::styled(
-        "Default backend: ",
-        Style::default().add_modifier(Modifier::BOLD),
-    )];
-    for (i, b) in AiBackend::all().iter().enumerate() {
-        let is_selected = *b == state.selected_backend;
+    let mut selector_spans = Vec::new();
+    for b in AiBackend::all() {
+        let is_selected = b == state.selected_backend;
         let style = if is_selected {
             Style::default()
-                .fg(Color::Green)
+                .fg(if state.backend_selector_focused {
+                    Color::Yellow
+                } else {
+                    Color::Green
+                })
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         };
         selector_spans.push(Span::styled(
-            format!("[{}] {}", i + 1, b.short_label()),
+            format!(
+                "({}) {}",
+                if is_selected { "•" } else { " " },
+                b.short_label()
+            ),
             style,
         ));
-        selector_spans.push(Span::raw("   "));
+        selector_spans.push(Span::raw("  "));
     }
     frame.render_widget(
         Paragraph::new(vec![
-            Line::from(selector_spans),
             Line::from(Span::styled(
-                "  press 1-6 to choose",
-                Style::default().fg(Color::DarkGray),
+                if state.backend_selector_focused {
+                    "[ Default backend ]  ←→ choose"
+                } else {
+                    "[ Default backend ]"
+                },
+                Style::default()
+                    .fg(if state.backend_selector_focused {
+                        Color::Yellow
+                    } else {
+                        Color::DarkGray
+                    })
+                    .add_modifier(if state.backend_selector_focused {
+                        Modifier::BOLD
+                    } else {
+                        Modifier::empty()
+                    }),
             )),
+            Line::from(selector_spans),
         ]),
         chunks[1],
     );
 
     // CLI path fields (focused_field: 0=Claude, 1=OpenCode, 2=Pi, 3=Codex,
-    // 4=Ollama OpenCode, 5=Ollama Pi, 6=LazyGit)
+    // 4=Antigravity, 5=Ollama OpenCode, 6=Ollama Pi, 7=LazyGit)
     render_path_field(
         frame,
         chunks[2],
         "Claude CLI",
         &state.claude_path,
         state.deps.claude_cli.found,
-        state.focused_field == 0,
+        !state.backend_selector_focused && state.focused_field == 0,
         state.editing_field == Some(WizardField::ClaudePath),
         &state.input_buffer,
     );
@@ -377,7 +398,7 @@ fn render_claude_config(frame: &mut Frame, area: Rect, state: &WizardState) {
         "OpenCode CLI",
         &state.opencode_path,
         state.deps.opencode_cli.found,
-        state.focused_field == 1,
+        !state.backend_selector_focused && state.focused_field == 1,
         state.editing_field == Some(WizardField::OpenCodePath),
         &state.input_buffer,
     );
@@ -387,7 +408,7 @@ fn render_claude_config(frame: &mut Frame, area: Rect, state: &WizardState) {
         "Pi CLI",
         &state.pi_path,
         state.deps.pi_cli.found,
-        state.focused_field == 2,
+        !state.backend_selector_focused && state.focused_field == 2,
         state.editing_field == Some(WizardField::PiPath),
         &state.input_buffer,
     );
@@ -397,46 +418,56 @@ fn render_claude_config(frame: &mut Frame, area: Rect, state: &WizardState) {
         "Codex CLI",
         &state.codex_path,
         state.deps.codex_cli.found,
-        state.focused_field == 3,
+        !state.backend_selector_focused && state.focused_field == 3,
         state.editing_field == Some(WizardField::CodexPath),
         &state.input_buffer,
     );
     render_path_field(
         frame,
         chunks[6],
-        "Ollama OpenCode",
-        &state.ollama_opencode_path,
-        state.deps.ollama_cli.found,
-        state.focused_field == 4,
-        state.editing_field == Some(WizardField::OllamaOpenCodePath),
+        "Antigravity CLI",
+        &state.antigravity_path,
+        state.deps.antigravity_cli.found,
+        !state.backend_selector_focused && state.focused_field == 4,
+        state.editing_field == Some(WizardField::AntigravityPath),
         &state.input_buffer,
     );
     render_path_field(
         frame,
         chunks[7],
-        "Ollama Pi",
-        &state.ollama_pi_path,
+        "Ollama OpenCode",
+        &state.ollama_opencode_path,
         state.deps.ollama_cli.found,
-        state.focused_field == 5,
-        state.editing_field == Some(WizardField::OllamaPiPath),
+        !state.backend_selector_focused && state.focused_field == 5,
+        state.editing_field == Some(WizardField::OllamaOpenCodePath),
         &state.input_buffer,
     );
     render_path_field(
         frame,
         chunks[8],
+        "Ollama Pi",
+        &state.ollama_pi_path,
+        state.deps.ollama_cli.found,
+        !state.backend_selector_focused && state.focused_field == 6,
+        state.editing_field == Some(WizardField::OllamaPiPath),
+        &state.input_buffer,
+    );
+    render_path_field(
+        frame,
+        chunks[9],
         "LazyGit",
         &state.lazygit_path,
         state.deps.lazygit.found,
-        state.focused_field == 6,
+        !state.backend_selector_focused && state.focused_field == 7,
         state.editing_field == Some(WizardField::LazygitPath),
         &state.input_buffer,
     );
 
     let hint = Paragraph::new(Span::styled(
-        "↑/↓ select field · e edit · 1-6 default backend · →/Tab next",
+        "↑/↓ focus · ←/→ choose backend when focused · e edit path · Tab next",
         Style::default().fg(Color::DarkGray),
     ));
-    frame.render_widget(hint, chunks[9]);
+    frame.render_widget(hint, chunks[10]);
 }
 
 /// Render a single "<label> Path: <status>" + editable value block.

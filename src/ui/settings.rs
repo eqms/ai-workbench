@@ -111,6 +111,7 @@ pub enum SettingsField {
     OpenCodeCommand,
     PiCommand,
     CodexCommand,
+    AntigravityCommand,
     OllamaOpenCodeCommand,
     OllamaPiCommand,
     Browser,
@@ -220,6 +221,8 @@ pub struct SettingsState {
     pub pi_command: String,
     /// Full command line for the Codex AI backend (e.g. `codex -s workspace-write`).
     pub codex_command: String,
+    /// Full command line for the Antigravity AI backend.
+    pub antigravity_command: String,
     /// Full command line for the Ollama OpenCode AI backend.
     pub ollama_opencode_command: String,
     /// Full command line for the Ollama Pi AI backend.
@@ -289,6 +292,7 @@ impl Default for SettingsState {
             opencode_command: "opencode".to_string(),
             pi_command: "pi".to_string(),
             codex_command: "codex".to_string(),
+            antigravity_command: "agy".to_string(),
             ollama_opencode_command: "ollama launch opencode".to_string(),
             ollama_pi_command: "ollama launch pi".to_string(),
             browser: String::new(),
@@ -362,6 +366,7 @@ impl SettingsState {
         self.opencode_command = join_command(&config.pty.opencode_command, "opencode");
         self.pi_command = join_command(&config.pty.pi_command, "pi");
         self.codex_command = join_command(&config.pty.codex_command, "codex");
+        self.antigravity_command = join_command(&config.pty.antigravity_command, "agy");
         self.ollama_opencode_command = join_command(&config.pty.ollama_opencode_command, "ollama");
         self.ollama_pi_command = join_command(&config.pty.ollama_pi_command, "ollama");
         self.browser = config.ui.browser.clone();
@@ -415,6 +420,7 @@ impl SettingsState {
         config.pty.opencode_command = split_command(&self.opencode_command, "opencode");
         config.pty.pi_command = split_command(&self.pi_command, "pi");
         config.pty.codex_command = split_command(&self.codex_command, "codex");
+        config.pty.antigravity_command = split_command(&self.antigravity_command, "agy");
         config.pty.ollama_opencode_command = split_command(&self.ollama_opencode_command, "ollama");
         config.pty.ollama_pi_command = split_command(&self.ollama_pi_command, "ollama");
         config.ui.browser = self.browser.clone();
@@ -492,7 +498,7 @@ impl SettingsState {
         match self.category {
             SettingsCategory::General => 6, // shell, scrollback, hidden, autosave, auto-refresh, check updates
             SettingsCategory::Layout => 4,  // file_browser, preview, right_panel, claude_height
-            SettingsCategory::Paths => 10, // claude, lazygit, opencode, pi, codex, ollama-opencode, ollama-pi, browser, external_editor, export_dir
+            SettingsCategory::Paths => 11,  // AI commands, lazygit, browser, editor, export
             SettingsCategory::Document => 23,
             SettingsCategory::Ssh => 3, // enabled, helper path, reset hint
             SettingsCategory::About => 0,
@@ -541,11 +547,12 @@ impl SettingsState {
                 2 => Some(SettingsField::OpenCodeCommand),
                 3 => Some(SettingsField::PiCommand),
                 4 => Some(SettingsField::CodexCommand),
-                5 => Some(SettingsField::OllamaOpenCodeCommand),
-                6 => Some(SettingsField::OllamaPiCommand),
-                7 => Some(SettingsField::Browser),
-                8 => Some(SettingsField::ExternalEditor),
-                9 => Some(SettingsField::ExportDir),
+                5 => Some(SettingsField::AntigravityCommand),
+                6 => Some(SettingsField::OllamaOpenCodeCommand),
+                7 => Some(SettingsField::OllamaPiCommand),
+                8 => Some(SettingsField::Browser),
+                9 => Some(SettingsField::ExternalEditor),
+                10 => Some(SettingsField::ExportDir),
                 _ => None,
             },
             SettingsCategory::Document => match self.selected_idx {
@@ -624,6 +631,7 @@ impl SettingsState {
                 SettingsField::OpenCodeCommand => self.opencode_command.clone(),
                 SettingsField::PiCommand => self.pi_command.clone(),
                 SettingsField::CodexCommand => self.codex_command.clone(),
+                SettingsField::AntigravityCommand => self.antigravity_command.clone(),
                 SettingsField::OllamaOpenCodeCommand => self.ollama_opencode_command.clone(),
                 SettingsField::OllamaPiCommand => self.ollama_pi_command.clone(),
                 SettingsField::ExportDir => self.export_dir.clone(),
@@ -851,6 +859,7 @@ impl SettingsState {
                 SettingsField::OpenCodeCommand => self.opencode_command = value,
                 SettingsField::PiCommand => self.pi_command = value,
                 SettingsField::CodexCommand => self.codex_command = value,
+                SettingsField::AntigravityCommand => self.antigravity_command = value,
                 SettingsField::OllamaOpenCodeCommand => self.ollama_opencode_command = value,
                 SettingsField::OllamaPiCommand => self.ollama_pi_command = value,
                 SettingsField::Browser => self.browser = value,
@@ -1296,9 +1305,17 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.input_cursor,
         ),
         format_setting(
+            "Antigravity Command",
+            &state.antigravity_command,
+            state.selected_idx == 5,
+            state.editing.as_ref() == Some(&SettingsField::AntigravityCommand),
+            &state.input_buffer,
+            state.input_cursor,
+        ),
+        format_setting(
             "Ollama OpenCode Command",
             &state.ollama_opencode_command,
-            state.selected_idx == 5,
+            state.selected_idx == 6,
             state.editing.as_ref() == Some(&SettingsField::OllamaOpenCodeCommand),
             &state.input_buffer,
             state.input_cursor,
@@ -1306,7 +1323,7 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
         format_setting(
             "Ollama Pi Command",
             &state.ollama_pi_command,
-            state.selected_idx == 6,
+            state.selected_idx == 7,
             state.editing.as_ref() == Some(&SettingsField::OllamaPiCommand),
             &state.input_buffer,
             state.input_cursor,
@@ -1314,7 +1331,7 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
         format_dropdown_setting(
             "Browser",
             &browser_display,
-            state.selected_idx == 7,
+            state.selected_idx == 8,
             state.editing.as_ref() == Some(&SettingsField::Browser),
             &state.input_buffer,
             state.input_cursor,
@@ -1322,7 +1339,7 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
         format_dropdown_setting(
             "External Editor",
             &editor_display,
-            state.selected_idx == 8,
+            state.selected_idx == 9,
             state.editing.as_ref() == Some(&SettingsField::ExternalEditor),
             &state.input_buffer,
             state.input_cursor,
@@ -1330,7 +1347,7 @@ fn render_paths(frame: &mut Frame, area: Rect, state: &SettingsState) {
         format_setting(
             "Export Directory",
             &export_dir_display,
-            state.selected_idx == 9,
+            state.selected_idx == 10,
             state.editing.as_ref() == Some(&SettingsField::ExportDir),
             &state.input_buffer,
             state.input_cursor,
@@ -1800,8 +1817,9 @@ mod tests {
         let mut state = SettingsState::default();
         assert_eq!(state.item_count(), 6); // General is default
         state.category = SettingsCategory::Paths;
-        // Paths: claude, lazygit, opencode, pi, codex, ollama-opencode, ollama-pi, browser, external_editor, export_dir
-        assert_eq!(state.item_count(), 10);
+        // Paths: claude, lazygit, opencode, pi, codex, antigravity, ollama-opencode,
+        // ollama-pi, browser, external_editor, export_dir
+        assert_eq!(state.item_count(), 11);
     }
 
     #[test]

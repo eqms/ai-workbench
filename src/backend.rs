@@ -2,7 +2,7 @@
 //!
 //! AI Workbench drives one of several AI coding-agent CLIs in its primary
 //! (AI) pane. The concrete backend is chosen via a positional CLI argument
-//! (`ai-workbench claude|opencode|pi|codex|ollama-opencode|ollama-pi`) and
+//! (`ai-workbench claude|codex|antigravity|opencode|pi|ollama-opencode|ollama-pi`) and
 //! persisted across runs. Every other pane (file browser, preview, LazyGit,
 //! terminal) is backend-agnostic.
 
@@ -21,6 +21,8 @@ pub enum AiBackend {
     Pi,
     /// OpenAI Codex CLI (`codex`).
     Codex,
+    /// Google Antigravity CLI (`agy`).
+    Antigravity,
     /// OpenCode launched via Ollama (`ollama launch opencode ...`).
     #[serde(rename = "ollama-opencode")]
     OllamaOpenCode,
@@ -38,6 +40,7 @@ impl AiBackend {
             "opencode" => Some(Self::OpenCode),
             "pi" => Some(Self::Pi),
             "codex" => Some(Self::Codex),
+            "antigravity" | "agy" => Some(Self::Antigravity),
             "ollama-opencode" => Some(Self::OllamaOpenCode),
             "ollama-pi" => Some(Self::OllamaPi),
             _ => None,
@@ -45,12 +48,13 @@ impl AiBackend {
     }
 
     /// All backends, in display order.
-    pub fn all() -> [Self; 6] {
+    pub fn all() -> [Self; 7] {
         [
             Self::Claude,
+            Self::Codex,
+            Self::Antigravity,
             Self::OpenCode,
             Self::Pi,
-            Self::Codex,
             Self::OllamaOpenCode,
             Self::OllamaPi,
         ]
@@ -59,10 +63,11 @@ impl AiBackend {
     /// The next backend in the cycle (wraps OllamaPi → Claude). Drives the F8 switch.
     pub fn next(self) -> Self {
         match self {
-            Self::Claude => Self::OpenCode,
+            Self::Claude => Self::Codex,
+            Self::Codex => Self::Antigravity,
+            Self::Antigravity => Self::OpenCode,
             Self::OpenCode => Self::Pi,
-            Self::Pi => Self::Codex,
-            Self::Codex => Self::OllamaOpenCode,
+            Self::Pi => Self::OllamaOpenCode,
             Self::OllamaOpenCode => Self::OllamaPi,
             Self::OllamaPi => Self::Claude,
         }
@@ -76,6 +81,7 @@ impl AiBackend {
             Self::OpenCode => "opencode",
             Self::Pi => "pi",
             Self::Codex => "codex",
+            Self::Antigravity => "agy",
             Self::OllamaOpenCode => "ollama",
             Self::OllamaPi => "ollama",
         }
@@ -88,6 +94,7 @@ impl AiBackend {
             Self::OpenCode => "opencode",
             Self::Pi => "pi",
             Self::Codex => "codex",
+            Self::Antigravity => "antigravity",
             Self::OllamaOpenCode => "ollama-opencode",
             Self::OllamaPi => "ollama-pi",
         }
@@ -100,6 +107,7 @@ impl AiBackend {
             Self::OpenCode => " OpenCode ",
             Self::Pi => " Pi ",
             Self::Codex => " Codex ",
+            Self::Antigravity => " Antigravity ",
             Self::OllamaOpenCode => " Ollama OpenCode ",
             Self::OllamaPi => " Ollama Pi ",
         }
@@ -112,6 +120,7 @@ impl AiBackend {
             Self::OpenCode => "OpenCode",
             Self::Pi => "Pi",
             Self::Codex => "Codex",
+            Self::Antigravity => "Antigravity",
             Self::OllamaOpenCode => "OllamaOC",
             Self::OllamaPi => "OllamaPi",
         }
@@ -120,8 +129,7 @@ impl AiBackend {
     /// Whether this backend understands the Claude-specific startup flags
     /// (`--permission-mode`, `--model`, `--effort`, `--name`, `--worktree`,
     /// `--remote-control`, `--dangerously-skip-permissions`). Only Claude does.
-    /// Codex has its own flag set (`-s`, `-a`, `-m`, `--search`) which users
-    /// configure via `pty.codex_command` instead of a startup dialog.
+    /// Other CLIs use backend-specific profiles in `ui::agent_startup`.
     pub fn supports_claude_flags(&self) -> bool {
         matches!(self, Self::Claude)
     }
@@ -147,6 +155,11 @@ mod tests {
         assert_eq!(AiBackend::parse("Codex"), Some(AiBackend::Codex));
         assert_eq!(AiBackend::parse("  codex  "), Some(AiBackend::Codex));
         assert_eq!(
+            AiBackend::parse("Antigravity"),
+            Some(AiBackend::Antigravity)
+        );
+        assert_eq!(AiBackend::parse("agy"), Some(AiBackend::Antigravity));
+        assert_eq!(
             AiBackend::parse("ollama-opencode"),
             Some(AiBackend::OllamaOpenCode)
         );
@@ -161,10 +174,11 @@ mod tests {
 
     #[test]
     fn next_cycles_and_wraps() {
-        assert_eq!(AiBackend::Claude.next(), AiBackend::OpenCode);
+        assert_eq!(AiBackend::Claude.next(), AiBackend::Codex);
+        assert_eq!(AiBackend::Codex.next(), AiBackend::Antigravity);
+        assert_eq!(AiBackend::Antigravity.next(), AiBackend::OpenCode);
         assert_eq!(AiBackend::OpenCode.next(), AiBackend::Pi);
-        assert_eq!(AiBackend::Pi.next(), AiBackend::Codex);
-        assert_eq!(AiBackend::Codex.next(), AiBackend::OllamaOpenCode);
+        assert_eq!(AiBackend::Pi.next(), AiBackend::OllamaOpenCode);
         assert_eq!(AiBackend::OllamaOpenCode.next(), AiBackend::OllamaPi);
         assert_eq!(AiBackend::OllamaPi.next(), AiBackend::Claude);
     }
@@ -175,6 +189,7 @@ mod tests {
         assert!(!AiBackend::OpenCode.supports_claude_flags());
         assert!(!AiBackend::Pi.supports_claude_flags());
         assert!(!AiBackend::Codex.supports_claude_flags());
+        assert!(!AiBackend::Antigravity.supports_claude_flags());
         assert!(!AiBackend::OllamaOpenCode.supports_claude_flags());
         assert!(!AiBackend::OllamaPi.supports_claude_flags());
     }

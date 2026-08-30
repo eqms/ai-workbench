@@ -245,6 +245,10 @@ impl App {
             ui::permission_mode::render(frame, area, &self.permission_mode_dialog);
         }
 
+        if self.agent_startup.visible {
+            ui::agent_startup::render(frame, area, &self.agent_startup);
+        }
+
         // Backend selection menu (F8), rendered on top
         if self.backend_switch.visible {
             ui::backend_switch::render(frame, area, &self.backend_switch, self.backend);

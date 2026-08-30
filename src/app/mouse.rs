@@ -496,9 +496,11 @@ impl App {
                     return;
                 }
 
-                // Backend selection menu - click outside cancels (no switch)
+                // Backend selection menu - click outside cancels (no switch).
+                // Goes through the shared cancel path so the initial launcher
+                // still spawns the AI PTY, exactly as Esc does.
                 if self.backend_switch.visible {
-                    self.backend_switch.close();
+                    self.cancel_backend_switch();
                     return;
                 }
 
