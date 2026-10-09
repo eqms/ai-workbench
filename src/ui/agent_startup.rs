@@ -327,7 +327,7 @@ const ANTIGRAVITY_SESSION: &[StartupProfile] = &[
     },
 ];
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AgentStartupState {
     pub visible: bool,
     pub backend: AiBackend,
@@ -346,30 +346,6 @@ pub struct AgentStartupState {
     agent_cursor: usize,
     search_enabled: bool,
     offline_enabled: bool,
-}
-
-impl Default for AgentStartupState {
-    fn default() -> Self {
-        Self {
-            visible: false,
-            backend: AiBackend::default(),
-            section_index: 0,
-            sandbox_selected: 0,
-            approval_selected: 0,
-            session_selected: 0,
-            interface_selected: 0,
-            thinking_selected: 0,
-            tools_selected: 0,
-            mode_selected: 0,
-            effort_selected: 0,
-            model: String::new(),
-            model_cursor: 0,
-            agent: String::new(),
-            agent_cursor: 0,
-            search_enabled: false,
-            offline_enabled: false,
-        }
-    }
 }
 
 impl AgentStartupState {

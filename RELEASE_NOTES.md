@@ -1,5 +1,36 @@
 # Release Notes
 
+## Version 1.13.1 (09.10.2026)
+
+### Fixed
+
+- **[FIX] A directory name can no longer run commands in the Terminal pane.**
+  When the file browser changes directory, the workbench types `cd '<path>'`
+  into the shell. Shell quoting neutralises `$(…)`, backticks and `;`, but not
+  control characters: the shell's line editor acts on Ctrl-U, Ctrl-C or an
+  escape sequence as a keystroke before the quotes are ever parsed. A cloned
+  repository containing a directory named `x<Ctrl-U>touch /tmp/pwn #` therefore
+  ran `touch /tmp/pwn` as soon as you entered it (reproduced with bash). Paths
+  containing any control character are now never typed into a pane — neither
+  for the directory sync nor for "insert path at cursor"; the skip is logged.
+- **[FIX] Pasted text can no longer break out of a bracketed paste.** The
+  paste markers were removed with one replace pass, so a crafted clipboard
+  payload (`ESC[20` + `ESC[201~` + `1~`) reassembled an end marker and the rest
+  of the paste ran as typed input. Every escape character is now dropped from
+  the payload after the markers are removed.
+- **[FIX] "Send selection to AI" strips control characters.** Only carriage
+  returns were removed before; escape sequences and Ctrl-keys from a previewed
+  file reached the AI CLI's line editor. Everything except newline and tab is
+  now filtered out.
+- **[FIX] CI clippy passes again.** A hand-written `Default` impl from v1.13.0
+  (`AgentStartupState`) failed `clippy -D warnings`; it is now derived.
+
+### Changed
+
+- **[CHG] `rustls` 0.23.43 → 0.23.45** (RUSTSEC-2026-0285, TLS 1.3 handshake
+  messages accepted across encryption levels). It sits on the self-update
+  download path via `self_update` → `reqwest`; `cargo audit` is clean again.
+
 ## Version 1.13.0 (30.08.2026)
 
 ### Added

@@ -478,15 +478,14 @@ impl App {
     pub(super) fn insert_path_at_cursor(&mut self, target: PaneId, path: &Path) {
         if let Some(pty) = self.terminals.get_mut(&target) {
             let path_str = path.to_string_lossy();
-            // shlex::try_quote fails only on NUL-byte paths (invalid on Unix/Windows).
-            // On failure, log a debug note and return without writing anything to the PTY.
-            // Never write a raw, unquoted path — it could execute shell metacharacters.
-            let escaped = match shlex::try_quote(&path_str) {
-                Ok(c) => c.into_owned(),
-                Err(_) => {
-                    // Path contains a NUL byte — reject silently (unreachable on sane FS).
-                    return;
-                }
+            // Never write a raw, unquoted path — it could execute shell
+            // metacharacters — nor one carrying control characters.
+            let Some(escaped) = quote_path_for_pty(&path_str) else {
+                log_update(&format!(
+                    "insert_path_at_cursor: skipping unsafe path: {:?}",
+                    path
+                ));
+                return;
             };
             // Write to PTY (no newline - just insert the path)
             let _ = pty.write_input(escaped.as_bytes());
@@ -494,17 +493,25 @@ impl App {
     }
 }
 
-/// Quote a filesystem path for use in a `cd` PTY command.
+/// Shell-quote a filesystem path that is about to be typed into a PTY.
 ///
-/// Returns `None` only when `shlex::try_quote` rejects the path — which
-/// happens exclusively for paths containing a NUL byte. On any real Unix
-/// filesystem NUL cannot appear in a path, so `None` is effectively
-/// unreachable in practice. Callers that receive `None` must **not** fall
-/// back to an unescaped path; they should log and skip instead.
+/// Returns `None` when the path contains any control character (which
+/// includes NUL). Quoting does not protect against those: the shell's line
+/// editor acts on Ctrl-U, Ctrl-C or ESC sequences as keystrokes before the
+/// quotes are ever parsed, so a directory named `x<Ctrl-U>touch /tmp/pwn #`
+/// would run a command. Callers that receive `None` must **not** fall back to
+/// the raw path; they should log and skip instead.
+fn quote_path_for_pty(path_str: &str) -> Option<String> {
+    if path_str.chars().any(char::is_control) {
+        return None;
+    }
+    shlex::try_quote(path_str).ok().map(|q| q.into_owned())
+}
+
+/// Build the `cd` command for a PTY, or `None` if the path is unsafe to type
+/// (see [`quote_path_for_pty`]).
 fn quote_path_for_cd(path_str: &str) -> Option<String> {
-    shlex::try_quote(path_str)
-        .ok()
-        .map(|q| format!("cd {}\r", q.into_owned()))
+    quote_path_for_pty(path_str).map(|q| format!("cd {q}\r"))
 }
 
 #[cfg(test)]
@@ -530,6 +537,31 @@ mod tests {
     fn test_quote_path_for_cd_simple_path() {
         let result = quote_path_for_cd("/home/user/projects");
         assert_eq!(result, Some("cd /home/user/projects\r".to_string()));
+    }
+
+    #[test]
+    fn test_quote_path_rejects_control_characters() {
+        // Ctrl-U kills the line in readline/zle/fish before the quotes are
+        // parsed, so the remainder would run as a command.
+        for path in [
+            "/tmp/x\x15touch /tmp/pwn #",
+            "/tmp/x\x03y",
+            "/tmp/x\x1b[Ay",
+            "/tmp/x\ry",
+            "/tmp/x\ny",
+            "/tmp/x\u{9b}y",
+            "/tmp/x\0y",
+        ] {
+            assert_eq!(quote_path_for_cd(path), None, "{path:?}");
+            assert_eq!(quote_path_for_pty(path), None, "{path:?}");
+        }
+    }
+
+    #[test]
+    fn test_quote_path_keeps_unicode_and_metacharacters_quoted() {
+        let cmd = quote_path_for_cd("/tmp/Größe $(id) `x`; \"q\"").unwrap();
+        assert!(cmd.starts_with("cd '"), "{cmd}");
+        assert!(cmd.contains("Größe"), "{cmd}");
     }
 
     fn config_with_claude_command() -> Config {

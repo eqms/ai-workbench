@@ -49,11 +49,12 @@ impl App {
             (filtered.lines, filtered.syntax_hint)
         };
 
-        // Strip carriage returns from PTY screen buffer rows (CRLF in PTY output would
-        // otherwise inject premature Enter keypresses into the Claude PTY).
+        // Strip control characters: CR (from CRLF in PTY rows) would inject
+        // premature Enter keypresses, and ESC sequences or Ctrl-U/Ctrl-C from
+        // previewed file content would be acted on by the AI CLI's line editor.
         let formatted_lines: Vec<String> = formatted_lines
             .into_iter()
-            .map(|l| l.replace('\r', ""))
+            .map(|l| crate::terminal::strip_control_chars(&l))
             .collect();
 
         // Format for Claude - wrap in markdown code block with syntax hint

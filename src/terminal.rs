@@ -621,8 +621,27 @@ impl PseudoTerminal {
 /// Remove bracketed-paste markers from text that is about to be sent inside a
 /// bracketed-paste block. A `ESC[201~` in the payload would close the block
 /// early, so everything after it would be interpreted as typed input.
+///
+/// Removing the marker strings alone is not enough — the replacement is not
+/// idempotent: `ESC[20` + `ESC[201~` + `1~` collapses into a fresh end marker.
+/// So after the markers, every remaining ESC and C1 CSI (`U+009B`) is dropped
+/// too, which makes it impossible for any marker to survive.
 pub(crate) fn strip_paste_markers(text: &str) -> String {
-    text.replace("\x1b[200~", "").replace("\x1b[201~", "")
+    text.replace("\x1b[200~", "")
+        .replace("\x1b[201~", "")
+        .chars()
+        .filter(|&c| c != '\x1b' && c != '\u{9b}')
+        .collect()
+}
+
+/// Drop control characters from text that is typed into a PTY, keeping only
+/// `\n` and `\t`. The inner application's line editor acts on control bytes
+/// (Ctrl-U, Ctrl-C, ESC sequences, CR as Enter) before any shell quoting is
+/// parsed, so untrusted text — file content, file names — must not carry them.
+pub(crate) fn strip_control_chars(text: &str) -> String {
+    text.chars()
+        .filter(|&c| c == '\n' || c == '\t' || !c.is_control())
+        .collect()
 }
 
 #[cfg(test)]
@@ -639,6 +658,21 @@ mod tests {
     fn plain_text_survives_paste_marker_stripping() {
         let text = "line one\nline two\n";
         assert_eq!(super::strip_paste_markers(text), text);
+    }
+
+    #[test]
+    fn nested_paste_markers_cannot_reassemble_an_end_marker() {
+        // A single-pass replace would turn this into `ESC[201~`.
+        let text = "a\x1b[20\x1b[201~1~b";
+        let out = super::strip_paste_markers(text);
+        assert!(!out.contains('\x1b'), "no ESC may survive: {out:?}");
+        assert!(!super::strip_paste_markers("x\u{9b}201~y").contains('\u{9b}'));
+    }
+
+    #[test]
+    fn control_chars_are_stripped_except_newline_and_tab() {
+        let text = "a\x15b\x03c\x1b[31md\re\x7ff\u{9b}g\n\th";
+        assert_eq!(super::strip_control_chars(text), "abc[31mdefg\n\th");
     }
 
     use super::*;
