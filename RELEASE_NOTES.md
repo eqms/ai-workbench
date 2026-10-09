@@ -1,5 +1,21 @@
 # Release Notes
 
+## Version 1.13.2 (09.10.2026)
+
+### Fixed
+
+- **[FIX] Previewing a special file can no longer freeze or exhaust the
+  workbench.** The preview read any selected entry in full on the UI thread. A
+  cloned repository with `README.md -> /dev/zero` filled memory until the
+  process died, and a FIFO blocked the UI forever. Files are now opened
+  non-blocking and checked on the open handle, so devices, FIFOs and sockets
+  are rejected before a byte is read. Files over 5 MB show a placeholder instead
+  of their content, and the read itself is capped too.
+- **[FIX] A placeholder can no longer overwrite a file.** Edit mode only
+  checked that the path was a regular file, so a binary file could be opened in
+  the editor and saved back as the text `[Binary or unreadable file]`. Editing
+  now requires the complete text to have been loaded.
+
 ## Version 1.13.1 (09.10.2026)
 
 ### Fixed

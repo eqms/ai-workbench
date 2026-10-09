@@ -21,6 +21,81 @@ fn is_markdown_file(path: &Path) -> bool {
     )
 }
 
+/// Largest file the preview reads. Bigger files get a placeholder rather than
+/// a truncated view — a truncated buffer would cut the file short if it were
+/// edited and saved.
+const MAX_PREVIEW_BYTES: u64 = 5 * 1024 * 1024;
+
+/// Why a path is shown as a placeholder instead of its content.
+#[derive(Debug, PartialEq)]
+enum PreviewSkip {
+    Directory,
+    /// Device, FIFO or socket — reading would block or never end.
+    NotRegular,
+    TooLarge,
+    /// Unreadable, or not valid UTF-8.
+    Unreadable,
+}
+
+impl PreviewSkip {
+    fn placeholder(&self) -> String {
+        match self {
+            Self::Directory => "[Directory]".to_string(),
+            Self::NotRegular => {
+                "[Special file (device, FIFO or socket) — not previewed]".to_string()
+            }
+            Self::TooLarge => format!(
+                "[File too large to preview (over {} MB)]",
+                MAX_PREVIEW_BYTES / (1024 * 1024)
+            ),
+            Self::Unreadable => "[Binary or unreadable file]".to_string(),
+        }
+    }
+}
+
+/// Read a file for the preview without ever blocking the UI thread.
+///
+/// The file is opened with `O_NONBLOCK` and checked via `fstat` on the open
+/// handle, so a FIFO or device — say `README.md -> /dev/zero` in a cloned
+/// repository — is rejected before a single byte is read, and cannot be
+/// swapped in between a `stat` and the `open`. The read is capped with
+/// `take()` as well, because some regular files (`/proc`) report a size of 0.
+fn read_preview_text(path: &Path) -> Result<String, PreviewSkip> {
+    use std::io::Read;
+
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
+        Err(_) if path.is_dir() => return Err(PreviewSkip::Directory),
+        Err(_) => return Err(PreviewSkip::Unreadable),
+    };
+    let meta = file.metadata().map_err(|_| PreviewSkip::Unreadable)?;
+    if meta.is_dir() {
+        return Err(PreviewSkip::Directory);
+    }
+    if !meta.is_file() {
+        return Err(PreviewSkip::NotRegular);
+    }
+    if meta.len() > MAX_PREVIEW_BYTES {
+        return Err(PreviewSkip::TooLarge);
+    }
+
+    let mut bytes = Vec::new();
+    file.take(MAX_PREVIEW_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| PreviewSkip::Unreadable)?;
+    if bytes.len() as u64 > MAX_PREVIEW_BYTES {
+        return Err(PreviewSkip::TooLarge);
+    }
+    String::from_utf8(bytes).map_err(|_| PreviewSkip::Unreadable)
+}
+
 #[derive(Debug)]
 pub struct PreviewState {
     // Core state
@@ -58,6 +133,11 @@ pub struct PreviewState {
 
     // Cached horizontal scrollbar area from last render (for accurate mouse hit testing)
     pub cached_h_scrollbar_area: Option<Rect>,
+
+    // True only when `content` holds the file's complete text. A placeholder
+    // (binary, too large, special file) must never reach the editor — saving
+    // it would overwrite the file with the placeholder text.
+    pub editable: bool,
 }
 
 impl Default for PreviewState {
@@ -80,6 +160,7 @@ impl Default for PreviewState {
             selection_start: None,
             last_modified: None,
             cached_h_scrollbar_area: None,
+            editable: false,
         }
     }
 }
@@ -107,72 +188,77 @@ impl PreviewState {
             self.syntax_name = syntax_manager.detect_syntax_name(&path);
         }
 
-        if let Ok(content) = fs::read_to_string(&path) {
-            self.content = content.clone();
-            self.original_content = content.clone();
+        let read = read_preview_text(&path);
+        self.editable = read.is_ok();
+        match read {
+            Ok(content) => {
+                self.content = content.clone();
+                self.original_content = content.clone();
 
-            // Store file modification time for auto-refresh
-            self.last_modified = fs::metadata(&path).and_then(|m| m.modified()).ok();
+                // Store file modification time for auto-refresh
+                self.last_modified = fs::metadata(&path).and_then(|m| m.modified()).ok();
 
-            // Use tui-markdown for markdown files, syntect for others
-            if self.is_markdown {
-                // Catch potential panics in the tui-markdown library. 0.3.8 panics
-                // on a task-list item that follows a code block (`spans.insert(1, …)`
-                // on a line with no spans); 0.3.9 fixes that case, but the guard stays
-                // — a rendering panic must never take the pane down.
-                //
-                // IMPORTANT: The entire conversion must be inside catch_unwind because
-                // tui-markdown can panic during iteration over md_text.lines, not just in from_str()
-                //
-                // The `expect_panic` guard tells the panic hook that this panic is
-                // handled here: without it the hook restores the terminal mid-frame
-                // (leaving the alternate screen under a running event loop), which
-                // corrupts the display even though the fallback below works fine.
-                let _expected = crate::crashlog::expect_panic();
-                let content_clone = content.clone();
-                let result: Result<Vec<Line<'static>>, _> =
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let md_text = tui_markdown::from_str(&content_clone);
-                        // Convert to owned Lines inside the catch_unwind
-                        md_text
-                            .lines
-                            .into_iter()
-                            .map(|line| {
-                                Line::from(
-                                    line.spans
-                                        .into_iter()
-                                        .map(|span| {
-                                            Span::styled(span.content.to_string(), span.style)
-                                        })
-                                        .collect::<Vec<_>>(),
-                                )
-                            })
-                            .collect()
-                    }));
+                // Use tui-markdown for markdown files, syntect for others
+                if self.is_markdown {
+                    // Catch potential panics in the tui-markdown library. 0.3.8 panics
+                    // on a task-list item that follows a code block (`spans.insert(1, …)`
+                    // on a line with no spans); 0.3.9 fixes that case, but the guard stays
+                    // — a rendering panic must never take the pane down.
+                    //
+                    // IMPORTANT: The entire conversion must be inside catch_unwind because
+                    // tui-markdown can panic during iteration over md_text.lines, not just in from_str()
+                    //
+                    // The `expect_panic` guard tells the panic hook that this panic is
+                    // handled here: without it the hook restores the terminal mid-frame
+                    // (leaving the alternate screen under a running event loop), which
+                    // corrupts the display even though the fallback below works fine.
+                    let _expected = crate::crashlog::expect_panic();
+                    let content_clone = content.clone();
+                    let result: Result<Vec<Line<'static>>, _> =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            let md_text = tui_markdown::from_str(&content_clone);
+                            // Convert to owned Lines inside the catch_unwind
+                            md_text
+                                .lines
+                                .into_iter()
+                                .map(|line| {
+                                    Line::from(
+                                        line.spans
+                                            .into_iter()
+                                            .map(|span| {
+                                                Span::styled(span.content.to_string(), span.style)
+                                            })
+                                            .collect::<Vec<_>>(),
+                                    )
+                                })
+                                .collect()
+                        }));
 
-                match result {
-                    Ok(lines) => {
-                        self.highlighted_lines = lines;
+                    match result {
+                        Ok(lines) => {
+                            self.highlighted_lines = lines;
+                        }
+                        Err(_) => {
+                            // Fallback: show raw markdown content when tui-markdown panics
+                            self.highlighted_lines = content
+                                .lines()
+                                .map(|line| Line::from(line.to_string()))
+                                .collect();
+                        }
                     }
-                    Err(_) => {
-                        // Fallback: show raw markdown content when tui-markdown panics
-                        self.highlighted_lines = content
-                            .lines()
-                            .map(|line| Line::from(line.to_string()))
-                            .collect();
-                    }
+                } else {
+                    self.highlighted_lines = syntax_manager.highlight(&content, &path);
                 }
-            } else {
-                self.highlighted_lines = syntax_manager.highlight(&content, &path);
             }
-        } else if path.is_dir() {
-            self.content = "[Directory]".to_string();
-            self.highlighted_lines = vec![Line::from("[Directory]")];
-            self.is_markdown = false;
-        } else {
-            self.content = "[Binary or unreadable file]".to_string();
-            self.highlighted_lines = vec![Line::from("[Binary or unreadable file]")];
-            self.is_markdown = false;
+            Err(skip) => {
+                let placeholder = skip.placeholder();
+                self.highlighted_lines = vec![Line::from(placeholder.clone())];
+                self.content = placeholder;
+                self.is_markdown = false;
+                // Drop the previous file's timestamp so auto-refresh does not
+                // compare this path against it.
+                self.last_modified = None;
+            }
         }
     }
 
@@ -274,11 +360,9 @@ impl PreviewState {
             return;
         }
 
-        // Check if file is editable (not directory, not binary)
-        if let Some(path) = &self.current_file {
-            if !path.is_file() {
-                return;
-            }
+        // Only a fully loaded text file is editable — never a placeholder
+        if !self.editable {
+            return;
         }
 
         let lines: Vec<String> = self.content.lines().map(String::from).collect();
@@ -1674,5 +1758,79 @@ mod tests {
             "tui-markdown panicked on a task list following a code block"
         );
         assert!(result.unwrap() > 0, "rendering produced no lines");
+    }
+
+    use super::{read_preview_text, PreviewSkip, PreviewState, MAX_PREVIEW_BYTES};
+    use crate::ui::syntax::SyntaxManager;
+
+    #[test]
+    fn regular_text_file_is_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, "hello\nwelt\n").unwrap();
+        assert_eq!(read_preview_text(&path).unwrap(), "hello\nwelt\n");
+    }
+
+    #[test]
+    fn file_over_the_limit_is_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.log");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(MAX_PREVIEW_BYTES + 1).unwrap(); // sparse, costs no disk
+        assert_eq!(read_preview_text(&path), Err(PreviewSkip::TooLarge));
+    }
+
+    #[test]
+    fn directory_and_binary_get_placeholders() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(read_preview_text(dir.path()), Err(PreviewSkip::Directory));
+        let bin = dir.path().join("x.bin");
+        std::fs::write(&bin, [0xff, 0xfe, 0x00, 0x80]).unwrap();
+        assert_eq!(read_preview_text(&bin), Err(PreviewSkip::Unreadable));
+    }
+
+    /// A FIFO without a writer would block a plain `open`/`read` forever and
+    /// freeze the UI thread.
+    #[cfg(unix)]
+    #[test]
+    fn fifo_is_rejected_without_blocking() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pipe");
+        let c_path = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+        assert_eq!(read_preview_text(&path), Err(PreviewSkip::NotRegular));
+    }
+
+    /// `README.md -> /dev/zero` in a cloned repository would otherwise be read
+    /// until the process runs out of memory.
+    #[cfg(unix)]
+    #[test]
+    fn symlink_to_a_device_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("README.md");
+        std::os::unix::fs::symlink("/dev/zero", &link).unwrap();
+        assert_eq!(read_preview_text(&link), Err(PreviewSkip::NotRegular));
+    }
+
+    #[test]
+    fn placeholder_content_never_reaches_the_editor() {
+        let dir = tempfile::tempdir().unwrap();
+        let syntax = SyntaxManager::new();
+        let mut preview = PreviewState::new();
+
+        let bin = dir.path().join("x.bin");
+        std::fs::write(&bin, [0xff, 0xfe, 0x00, 0x80]).unwrap();
+        preview.load_file(bin, &syntax);
+        preview.enter_edit_mode();
+        assert!(
+            preview.editor.is_none(),
+            "binary placeholder became editable"
+        );
+
+        let txt = dir.path().join("a.txt");
+        std::fs::write(&txt, "text\n").unwrap();
+        preview.load_file(txt, &syntax);
+        preview.enter_edit_mode();
+        assert!(preview.editor.is_some(), "text file must stay editable");
     }
 }
