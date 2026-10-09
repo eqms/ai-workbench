@@ -175,8 +175,9 @@ git:
   auto_fetch: false
 ```
 
-Session persistence (`src/session/mod.rs`) is stubbed and currently returns
-default state.
+Session persistence (`src/session.rs`) is global, not per project: it stores
+the last-used AI backend and the date of the daily `claude update` in
+`~/.config/ai-workbench/session.yaml`. Saving is best-effort and silent.
 
 ## Conventions
 
