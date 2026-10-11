@@ -705,7 +705,9 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
     // Resolve the active backend: explicit CLI argument wins, otherwise resume
     // the last-used backend from the session (default: Claude). The argument was
     // already validated in `main()`, so `parse` failing here means "not given".
-    let choose_backend_at_startup = mode.is_none();
+    // Without an argument the launcher asks, unless the user ticked "remember
+    // choice" (`ui.choose_backend_at_startup = false`).
+    let choose_backend_at_startup = mode.is_none() && config.ui.choose_backend_at_startup;
     let backend = mode
         .as_deref()
         .and_then(AiBackend::parse)

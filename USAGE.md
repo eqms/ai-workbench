@@ -27,6 +27,7 @@
 | F6 | Toggle User Terminal (syncs to current directory) |
 | F7 | Claude Settings (~/.claude) |
 | F8 | Open the AI backend menu — Claude / Codex / Antigravity / OpenCode / Pi / Ollama variants. F8 or ↑↓/j k moves the highlight, Enter opens that CLI's startup screen and respawns the AI pane, Esc cancels |
+| Space | In the startup chooser only: tick *Remember choice* — later starts skip the chooser and resume the last-used CLI. Re-enable via Settings → General → *Ask for AI CLI at Startup* |
 | Shift+F8 | Settings |
 | F9 | File Menu (File Browser) / Copy last command block (Terminal) or last N lines (Claude, LazyGit) |
 | Shift+F9 | Copy last N lines with interactive count input (Terminal panes) |
@@ -476,6 +477,7 @@ Please attach the file when reporting a problem.
 | F6 | Benutzer-Terminal umschalten (wechselt ins aktuelle Verzeichnis) |
 | F7 | Claude Einstellungen (~/.claude) |
 | F8 | KI-Backend-Menü öffnen — Claude / Codex / Antigravity / OpenCode / Pi / Ollama-Varianten. F8 oder ↑↓/j k bewegen die Auswahl, Enter öffnet den passenden Startdialog und startet den KI-Bereich neu, Esc bricht ab |
+| Leertaste | Nur im Startmenü: *Remember choice* ankreuzen — spätere Starts überspringen das Menü und starten direkt die zuletzt genutzte CLI. Wieder einschalten über Einstellungen → General → *Ask for AI CLI at Startup* |
 | Shift+F8 | Einstellungen |
 | F9 | Datei-Menü (Dateibrowser) / Letzten Kommando-Block (Terminal) bzw. letzte N Zeilen (Claude, LazyGit) kopieren |
 | Shift+F9 | Letzte N Zeilen mit interaktiver Eingabe kopieren (Terminal-Bereiche) |

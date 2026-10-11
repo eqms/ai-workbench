@@ -1,5 +1,29 @@
 # Release Notes
 
+## Version 1.14.0 (11.10.2026)
+
+### Added
+
+- **[ADD] "Remember choice" in the AI CLI chooser.** The chooser that opens
+  when `ai-workbench` starts without a backend argument now has a checkbox,
+  toggled with Space. Confirming with it ticked — Enter, or Esc for "last used"
+  — stops the chooser from appearing: later starts resume the last-used CLI
+  directly. *Settings → General → Ask for AI CLI at Startup* turns the chooser
+  back on. Stored as `ui.choose_backend_at_startup`; existing config files
+  without the key keep the chooser. A positional backend argument still wins,
+  and the F8 runtime switch is unchanged.
+
+### Fixed
+
+- **[FIX] A repository's `uploadpack` setting no longer runs on fetch or
+  pull.** For a remote that is a local path, git runs
+  `remote.<name>.uploadpack` through `sh -c`. A directory tree that arrives
+  with its `.git/` (an archive rather than a clone) could set it to any
+  command, and both the background fetch and the confirmed "Pull now?" ran it.
+  Both now pass `--upload-pack=git-upload-pack`, which overrides the
+  repository's config; for ssh and https remotes this only restates the
+  default.
+
 ## Version 1.13.2 (09.10.2026)
 
 ### Fixed

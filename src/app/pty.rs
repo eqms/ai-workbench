@@ -224,7 +224,34 @@ impl App {
         let target = self.backend;
         self.backend_switch.close();
         if was_startup {
+            self.persist_launcher_remember();
             self.apply_ai_backend(target);
+        }
+    }
+
+    /// Confirm the backend-selection menu (Enter): apply the highlighted
+    /// backend, and in the startup launcher honour the "remember" checkbox.
+    pub(super) fn confirm_backend_switch(&mut self) {
+        let target = self.backend_switch.selected_backend();
+        let was_startup = self.backend_switch.startup;
+        self.backend_switch.close();
+        if was_startup {
+            self.persist_launcher_remember();
+        }
+        self.apply_ai_backend(target);
+    }
+
+    /// If "remember choice" was ticked in the startup launcher, turn the
+    /// launcher off for future starts. The backend itself is already persisted
+    /// as `session.last_backend` by [`Self::apply_ai_backend`], which is what a
+    /// start without the launcher resumes. Re-enabled in Settings → General.
+    fn persist_launcher_remember(&mut self) {
+        if !self.backend_switch.remember {
+            return;
+        }
+        self.config.ui.choose_backend_at_startup = false;
+        if let Err(e) = crate::config::save_config(&self.config) {
+            log_update(&format!("launcher: could not save remember choice: {e}"));
         }
     }
 

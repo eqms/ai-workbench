@@ -209,6 +209,7 @@ pub struct SettingsState {
     pub show_hidden_files: bool,
     pub autosave: bool,
     pub auto_refresh_ms: u64,
+    pub choose_backend_at_startup: bool,
     pub file_browser_width: u16,
     pub preview_width: u16,
     pub right_panel_width: u16,
@@ -283,6 +284,7 @@ impl Default for SettingsState {
             show_hidden_files: true, // Show hidden files by default
             autosave: false,
             auto_refresh_ms: 2000,
+            choose_backend_at_startup: true,
             file_browser_width: 20,
             preview_width: 50,
             right_panel_width: 30,
@@ -346,6 +348,7 @@ impl SettingsState {
         self.show_hidden_files = config.file_browser.show_hidden;
         self.autosave = config.ui.autosave;
         self.auto_refresh_ms = config.file_browser.auto_refresh_ms;
+        self.choose_backend_at_startup = config.ui.choose_backend_at_startup;
         self.file_browser_width = config.layout.file_browser_width_percent;
         self.preview_width = config.layout.preview_width_percent;
         self.right_panel_width = config.layout.right_panel_width_percent;
@@ -410,6 +413,7 @@ impl SettingsState {
         config.file_browser.show_hidden = self.show_hidden_files;
         config.ui.autosave = self.autosave;
         config.file_browser.auto_refresh_ms = self.auto_refresh_ms;
+        config.ui.choose_backend_at_startup = self.choose_backend_at_startup;
         config.layout.file_browser_width_percent = self.file_browser_width;
         config.layout.preview_width_percent = self.preview_width;
         config.layout.right_panel_width_percent = self.right_panel_width;
@@ -496,7 +500,7 @@ impl SettingsState {
 
     pub fn item_count(&self) -> usize {
         match self.category {
-            SettingsCategory::General => 6, // shell, scrollback, hidden, autosave, auto-refresh, check updates
+            SettingsCategory::General => 7, // shell, scrollback, hidden, autosave, auto-refresh, AI launcher, check updates
             SettingsCategory::Layout => 4,  // file_browser, preview, right_panel, claude_height
             SettingsCategory::Paths => 11,  // AI commands, lazygit, browser, editor, export
             SettingsCategory::Document => 23,
@@ -507,7 +511,7 @@ impl SettingsState {
 
     /// Check if the currently selected item is the "Check for Updates" action
     pub fn is_check_updates_selected(&self) -> bool {
-        self.category == SettingsCategory::General && self.selected_idx == 5
+        self.category == SettingsCategory::General && self.selected_idx == 6
     }
 
     pub fn move_up(&mut self) {
@@ -804,6 +808,10 @@ impl SettingsState {
                 }
                 3 => {
                     self.autosave = !self.autosave;
+                    self.has_changes = true;
+                }
+                5 => {
+                    self.choose_backend_at_startup = !self.choose_backend_at_startup;
                     self.has_changes = true;
                 }
                 _ => self.start_editing(),
@@ -1188,7 +1196,12 @@ fn render_general(frame: &mut Frame, area: Rect, state: &SettingsState) {
             &state.input_buffer,
             state.input_cursor,
         ),
-        format_action_setting("Check for Updates", state.selected_idx == 5),
+        format_bool_setting(
+            "Ask for AI CLI at Startup",
+            state.choose_backend_at_startup,
+            state.selected_idx == 5,
+        ),
+        format_action_setting("Check for Updates", state.selected_idx == 6),
     ];
 
     let list = create_settings_list(items);
@@ -1815,7 +1828,7 @@ mod tests {
     #[test]
     fn test_paths_item_count() {
         let mut state = SettingsState::default();
-        assert_eq!(state.item_count(), 6); // General is default
+        assert_eq!(state.item_count(), 7); // General is default
         state.category = SettingsCategory::Paths;
         // Paths: claude, lazygit, opencode, pi, codex, antigravity, ollama-opencode,
         // ollama-pi, browser, external_editor, export_dir
@@ -1893,6 +1906,31 @@ mod tests {
         let is_custom = state.dropdown_confirm();
         assert!(is_custom);
         assert!(state.editing.is_some()); // Text editing mode activated
+    }
+
+    /// The "remember choice" checkbox in the launcher turns the launcher off;
+    /// Settings → General must be able to turn it back on and persist it.
+    #[test]
+    fn test_ai_launcher_toggle_round_trips_through_config() {
+        let mut config = Config::default();
+        config.ui.choose_backend_at_startup = false;
+
+        let mut state = SettingsState::default();
+        state.load_from_config(&config);
+        assert!(!state.choose_backend_at_startup);
+
+        state.category = SettingsCategory::General;
+        state.selected_idx = 5;
+        assert!(!state.is_check_updates_selected());
+        state.toggle_or_select();
+        assert!(state.choose_backend_at_startup);
+        assert!(state.has_changes);
+
+        state.apply_to_config(&mut config);
+        assert!(config.ui.choose_backend_at_startup);
+
+        state.selected_idx = 6;
+        assert!(state.is_check_updates_selected());
     }
 
     #[test]

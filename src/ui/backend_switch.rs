@@ -27,6 +27,10 @@ pub struct BackendSwitchState {
     pub startup: bool,
     /// Index into [`AiBackend::all`] of the currently highlighted entry.
     pub selected: usize,
+    /// Startup only: "remember this choice" checkbox. When set on confirm, the
+    /// launcher is turned off (`ui.choose_backend_at_startup = false`) and later
+    /// starts resume the last-used backend directly.
+    pub remember: bool,
 }
 
 impl BackendSwitchState {
@@ -34,6 +38,7 @@ impl BackendSwitchState {
     pub fn open(&mut self, current: AiBackend) {
         self.visible = true;
         self.startup = false;
+        self.remember = false;
         self.selected = AiBackend::all()
             .iter()
             .position(|b| *b == current)
@@ -49,6 +54,14 @@ impl BackendSwitchState {
     /// Close the menu (cancel — no switch applied).
     pub fn close(&mut self) {
         self.visible = false;
+    }
+
+    /// Toggle the "remember this choice" checkbox. Only meaningful in the
+    /// startup launcher; the F8 runtime switch has no checkbox.
+    pub fn toggle_remember(&mut self) {
+        if self.startup {
+            self.remember = !self.remember;
+        }
     }
 
     /// Move the highlight to the next entry (wraps). Drives F8 / ↓ / j.
@@ -97,8 +110,10 @@ pub fn render(frame: &mut Frame, area: Rect, state: &BackendSwitchState, active:
     let backends = AiBackend::all();
 
     let popup_width = area.width.saturating_sub(2).min(104);
-    // title(2) + list(len) + footer(2) + borders(2)
-    let popup_height: u16 = (backends.len() as u16 + 6).min(area.height.saturating_sub(2));
+    // title(1) + list(len) + [checkbox(1)] + footer(1) + margins(2) + borders(2)
+    let checkbox_rows: u16 = if state.startup { 1 } else { 0 };
+    let popup_height: u16 =
+        (backends.len() as u16 + 6 + checkbox_rows).min(area.height.saturating_sub(2));
 
     let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
     let popup_y = area.y + (area.height.saturating_sub(popup_height)) / 2;
@@ -124,6 +139,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &BackendSwitchState, active:
     let chunks = Layout::vertical([
         Constraint::Length(1),                     // Title
         Constraint::Length(backends.len() as u16), // Backend list
+        Constraint::Length(checkbox_rows),         // Remember checkbox (startup only)
         Constraint::Min(1),                        // Footer
     ])
     .split(popup_area.inner(ratatui::layout::Margin {
@@ -175,12 +191,46 @@ pub fn render(frame: &mut Frame, area: Rect, state: &BackendSwitchState, active:
     }
     frame.render_widget(List::new(items), chunks[1]);
 
-    let footer = Line::from(vec![
+    if state.startup {
+        let (mark, mark_style) = if state.remember {
+            (
+                "[x]",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            ("[ ]", Style::default().fg(Color::DarkGray))
+        };
+        let checkbox = Line::from(vec![
+            Span::styled(format!(" {} ", mark), mark_style),
+            Span::styled(
+                "Remember choice — don't ask at startup",
+                Style::default().fg(Color::White),
+            ),
+            Span::styled(
+                "  (re-enable: Settings → General)",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(checkbox), chunks[2]);
+    }
+
+    let mut footer_spans = vec![
         Span::styled(
             " F8/↑↓ ",
             Style::default().bg(Color::DarkGray).fg(Color::White),
         ),
         Span::raw(" Select  "),
+    ];
+    if state.startup {
+        footer_spans.push(Span::styled(
+            " Space ",
+            Style::default().bg(Color::DarkGray).fg(Color::White),
+        ));
+        footer_spans.push(Span::raw(" Remember  "));
+    }
+    footer_spans.extend([
         Span::styled(" Enter ", Style::default().bg(Color::Cyan).fg(Color::Black)),
         Span::raw(if state.startup {
             " Continue  "
@@ -197,7 +247,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &BackendSwitchState, active:
             " Cancel"
         }),
     ]);
-    frame.render_widget(Paragraph::new(footer), chunks[2]);
+    frame.render_widget(Paragraph::new(Line::from(footer_spans)), chunks[3]);
 }
 
 #[cfg(test)]
@@ -253,6 +303,69 @@ mod tests {
         assert_eq!(state.selected_backend(), AiBackend::OllamaPi);
         state.prev();
         assert_eq!(state.selected_backend(), AiBackend::OllamaOpenCode);
+    }
+
+    #[test]
+    fn remember_toggles_only_in_the_startup_launcher() {
+        let mut state = BackendSwitchState::default();
+        state.open(AiBackend::Claude);
+        state.toggle_remember();
+        assert!(!state.remember, "F8 switch has no checkbox");
+
+        state.open_startup(AiBackend::Claude);
+        state.toggle_remember();
+        assert!(state.remember);
+        state.toggle_remember();
+        assert!(!state.remember);
+    }
+
+    fn render_to_text(state: &BackendSwitchState) -> String {
+        let backend = ratatui::backend::TestBackend::new(110, 20);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| render(f, f.area(), state, AiBackend::Claude))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn startup_launcher_shows_checkbox_and_full_footer() {
+        let mut state = BackendSwitchState::default();
+        state.open_startup(AiBackend::Claude);
+        let text = render_to_text(&state);
+        assert!(text.contains("[ ] Remember choice"), "{text}");
+        assert!(text.contains("Space"), "{text}");
+        assert!(text.contains("Last used"), "footer cut off:\n{text}");
+        assert!(text.contains("OllamaPi"), "list cut off:\n{text}");
+
+        state.toggle_remember();
+        assert!(render_to_text(&state).contains("[x] Remember choice"));
+    }
+
+    #[test]
+    fn f8_switch_has_no_checkbox() {
+        let mut state = BackendSwitchState::default();
+        state.open(AiBackend::Claude);
+        let text = render_to_text(&state);
+        assert!(!text.contains("Remember choice"), "{text}");
+        assert!(text.contains("Cancel"), "{text}");
+    }
+
+    #[test]
+    fn reopening_clears_a_previous_remember() {
+        let mut state = BackendSwitchState::default();
+        state.open_startup(AiBackend::Claude);
+        state.toggle_remember();
+        state.open_startup(AiBackend::Claude);
+        assert!(!state.remember);
     }
 
     #[test]

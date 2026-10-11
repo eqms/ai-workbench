@@ -357,6 +357,11 @@ pub struct UiConfig {
     /// Set to `false` to skip it entirely (e.g. on slow/headless systems).
     #[serde(default = "default_true")]
     pub intro_animation: bool,
+    /// Show the "Choose AI CLI" launcher when started without a backend
+    /// argument. `false` resumes the last-used backend directly — set by the
+    /// launcher's "remember choice" checkbox, re-enabled in Settings → General.
+    #[serde(default = "default_true")]
+    pub choose_backend_at_startup: bool,
 }
 
 fn default_remote_transfer() -> String {
@@ -420,6 +425,7 @@ impl Default for Config {
                 export_dir: String::new(),
                 remote_transfer: default_remote_transfer(),
                 intro_animation: true,
+                choose_backend_at_startup: true,
             },
             layout: LayoutConfig::default(),
             file_browser: FileBrowserConfig::default(),
@@ -1191,6 +1197,16 @@ mod tests {
         let yaml = "terminal:\n  shell_path: /bin/bash\n  shell_args: []\nui:\n  theme: default\n";
         let config: Config = serde_yaml_ng::from_str(yaml).expect("legacy config must parse");
         assert!(!config.git.auto_fetch);
+    }
+
+    #[test]
+    fn existing_config_keeps_the_ai_launcher() {
+        // Files written before `ui.choose_backend_at_startup` existed must keep
+        // asking at startup — only the launcher's checkbox turns it off.
+        let yaml = "terminal:\n  shell_path: /bin/bash\n  shell_args: []\nui:\n  theme: default\n";
+        let config: Config = serde_yaml_ng::from_str(yaml).expect("legacy config must parse");
+        assert!(config.ui.choose_backend_at_startup);
+        assert!(Config::default().ui.choose_backend_at_startup);
     }
 
     #[test]
