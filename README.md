@@ -13,7 +13,7 @@
 
 A Rust-based TUI (Terminal User Interface) multiplexer designed for AI-assisted development workflows. Provides an integrated development environment with file browser, syntax-highlighted preview pane, and multiple embedded PTY terminals.
 
-The primary (AI) pane is **backend-selectable**. Starting `ai-workbench` opens a CLI chooser for Claude Code, Codex, Antigravity, OpenCode, Pi and the Ollama variants; a positional argument remains available for scripted launches. Tick **Remember choice** (Space) in the chooser to skip it from then on and resume the last-used CLI directly; *Settings → General → Ask for AI CLI at Startup* brings it back. Every other pane stays identical.
+The primary (AI) pane is **backend-selectable**. Starting `ai-workbench` opens a CLI chooser for Claude Code, Codex, Antigravity, OpenCode, Pi and the Ollama variants; a positional argument remains available for scripted launches. Tick **Remember choice** (Space) in the chooser to skip it from then on and resume the last-used CLI directly; *Settings → General → Ask for AI CLI at Startup* brings it back. With *Show Claude Start Dialog* switched off as well, Claude starts immediately with its last confirmed permission, model and effort. Every other pane stays identical.
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)

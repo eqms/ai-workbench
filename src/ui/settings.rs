@@ -210,6 +210,7 @@ pub struct SettingsState {
     pub autosave: bool,
     pub auto_refresh_ms: u64,
     pub choose_backend_at_startup: bool,
+    pub show_claude_start_dialog: bool,
     pub file_browser_width: u16,
     pub preview_width: u16,
     pub right_panel_width: u16,
@@ -285,6 +286,7 @@ impl Default for SettingsState {
             autosave: false,
             auto_refresh_ms: 2000,
             choose_backend_at_startup: true,
+            show_claude_start_dialog: true,
             file_browser_width: 20,
             preview_width: 50,
             right_panel_width: 30,
@@ -349,6 +351,7 @@ impl SettingsState {
         self.autosave = config.ui.autosave;
         self.auto_refresh_ms = config.file_browser.auto_refresh_ms;
         self.choose_backend_at_startup = config.ui.choose_backend_at_startup;
+        self.show_claude_start_dialog = config.claude.show_permission_dialog;
         self.file_browser_width = config.layout.file_browser_width_percent;
         self.preview_width = config.layout.preview_width_percent;
         self.right_panel_width = config.layout.right_panel_width_percent;
@@ -414,6 +417,7 @@ impl SettingsState {
         config.ui.autosave = self.autosave;
         config.file_browser.auto_refresh_ms = self.auto_refresh_ms;
         config.ui.choose_backend_at_startup = self.choose_backend_at_startup;
+        config.claude.show_permission_dialog = self.show_claude_start_dialog;
         config.layout.file_browser_width_percent = self.file_browser_width;
         config.layout.preview_width_percent = self.preview_width;
         config.layout.right_panel_width_percent = self.right_panel_width;
@@ -500,7 +504,7 @@ impl SettingsState {
 
     pub fn item_count(&self) -> usize {
         match self.category {
-            SettingsCategory::General => 7, // shell, scrollback, hidden, autosave, auto-refresh, AI launcher, check updates
+            SettingsCategory::General => 8, // shell, scrollback, hidden, autosave, auto-refresh, AI launcher, Claude dialog, check updates
             SettingsCategory::Layout => 4,  // file_browser, preview, right_panel, claude_height
             SettingsCategory::Paths => 11,  // AI commands, lazygit, browser, editor, export
             SettingsCategory::Document => 23,
@@ -511,7 +515,7 @@ impl SettingsState {
 
     /// Check if the currently selected item is the "Check for Updates" action
     pub fn is_check_updates_selected(&self) -> bool {
-        self.category == SettingsCategory::General && self.selected_idx == 6
+        self.category == SettingsCategory::General && self.selected_idx == 7
     }
 
     pub fn move_up(&mut self) {
@@ -812,6 +816,10 @@ impl SettingsState {
                 }
                 5 => {
                     self.choose_backend_at_startup = !self.choose_backend_at_startup;
+                    self.has_changes = true;
+                }
+                6 => {
+                    self.show_claude_start_dialog = !self.show_claude_start_dialog;
                     self.has_changes = true;
                 }
                 _ => self.start_editing(),
@@ -1201,7 +1209,12 @@ fn render_general(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.choose_backend_at_startup,
             state.selected_idx == 5,
         ),
-        format_action_setting("Check for Updates", state.selected_idx == 6),
+        format_bool_setting(
+            "Show Claude Start Dialog",
+            state.show_claude_start_dialog,
+            state.selected_idx == 6,
+        ),
+        format_action_setting("Check for Updates", state.selected_idx == 7),
     ];
 
     let list = create_settings_list(items);
@@ -1828,7 +1841,7 @@ mod tests {
     #[test]
     fn test_paths_item_count() {
         let mut state = SettingsState::default();
-        assert_eq!(state.item_count(), 7); // General is default
+        assert_eq!(state.item_count(), 8); // General is default
         state.category = SettingsCategory::Paths;
         // Paths: claude, lazygit, opencode, pi, codex, antigravity, ollama-opencode,
         // ollama-pi, browser, external_editor, export_dir
@@ -1929,8 +1942,28 @@ mod tests {
         state.apply_to_config(&mut config);
         assert!(config.ui.choose_backend_at_startup);
 
-        state.selected_idx = 6;
+        state.selected_idx = 7;
         assert!(state.is_check_updates_selected());
+    }
+
+    /// Off = Claude starts straight away with the values last confirmed in its
+    /// start dialog (`claude.default_*`, persisted on Enter).
+    #[test]
+    fn test_claude_start_dialog_toggle_round_trips_through_config() {
+        let mut config = Config::default();
+        assert!(config.claude.show_permission_dialog);
+
+        let mut state = SettingsState::default();
+        state.load_from_config(&config);
+        state.category = SettingsCategory::General;
+        state.selected_idx = 6;
+        state.toggle_or_select();
+        assert!(!state.show_claude_start_dialog);
+        assert!(state.has_changes);
+
+        state.apply_to_config(&mut config);
+        assert!(!config.claude.show_permission_dialog);
+        assert!(config.ui.choose_backend_at_startup, "neighbour untouched");
     }
 
     #[test]

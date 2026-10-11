@@ -1,5 +1,18 @@
 # Release Notes
 
+## Version 1.14.1 (11.10.2026)
+
+### Added
+
+- **[ADD] Settings switch for Claude's startup screen.** *Settings → General →
+  Show Claude Start Dialog* turns the permission/model/effort screen on or
+  off; it was only reachable as `claude.show_permission_dialog` in
+  `config.yaml` before. With it off, Claude starts straight away with the
+  values last confirmed in that screen, which `Enter` stores as
+  `claude.default_*` — including a session or worktree name, so clear those
+  first if they should not be reused. Together with "Remember choice" from
+  v1.14.0, a start can now go straight into Claude with no screen at all.
+
 ## Version 1.14.0 (11.10.2026)
 
 ### Added

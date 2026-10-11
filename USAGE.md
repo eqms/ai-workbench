@@ -32,7 +32,7 @@
 | F9 | File Menu (File Browser) / Copy last command block (Terminal) or last N lines (Claude, LazyGit) |
 | Shift+F9 | Copy last N lines with interactive count input (Terminal panes) |
 
-In a backend startup screen, `Tab` / `Shift+Tab` changes the section, arrow keys change the selected option, and text can be entered directly in Model or Agent sections. `Enter` starts with the displayed selections; `Esc` starts with configured defaults.
+In a backend startup screen, `Tab` / `Shift+Tab` changes the section, arrow keys change the selected option, and text can be entered directly in Model or Agent sections. `Enter` starts with the displayed selections; `Esc` starts with configured defaults. Claude's startup screen can be switched off in Settings → General → *Show Claude Start Dialog*: Claude then starts straight away with the values last confirmed there with `Enter` — including a session or worktree name, so clear those first if you do not want them reused.
 
 #### Settings / Input Dialogs (when editing a text field)
 | Key | Action |
@@ -485,7 +485,7 @@ Please attach the file when reporting a problem.
 | F12 | Hilfe |
 | Esc | Dialoge/Hilfe schließen |
 
-In einem Backend-Startdialog wechseln `Tab` / `Shift+Tab` die Sektion, die Pfeiltasten ändern die Auswahl und in Modell- oder Agent-Sektionen kann direkt Text eingegeben werden. `Enter` startet mit den angezeigten Optionen; `Esc` verwendet die konfigurierten Standardwerte.
+In einem Backend-Startdialog wechseln `Tab` / `Shift+Tab` die Sektion, die Pfeiltasten ändern die Auswahl und in Modell- oder Agent-Sektionen kann direkt Text eingegeben werden. `Enter` startet mit den angezeigten Optionen; `Esc` verwendet die konfigurierten Standardwerte. Claudes Startdialog lässt sich unter Einstellungen → General → *Show Claude Start Dialog* abschalten: Claude startet dann sofort mit den zuletzt dort per `Enter` bestätigten Werten — einschließlich eines Session- oder Worktree-Namens; diese Felder vorher leeren, wenn sie nicht wiederverwendet werden sollen.
 
 #### Einstellungen / Eingabedialoge (bei Bearbeitung eines Textfelds)
 | Taste | Aktion |
