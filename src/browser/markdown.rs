@@ -92,7 +92,7 @@ fn convert_single_md(
 
     let template = build_html_template(doc);
     let html = template
-        .replace("{title}", title)
+        .replace("{title}", &crate::browser::html_escape(title))
         .replace("{content}", &html_content);
 
     // Create secure temp file (O_EXCL) — content written after link rewriting
@@ -156,7 +156,8 @@ fn fix_md_links(html: &str, link_map: &HashMap<String, PathBuf>) -> String {
             // Normalize: strip leading "./"
             let normalized = md_href.trim_start_matches("./");
             if let Some(html_path) = link_map.get(normalized) {
-                let file_url = format!("file://{}", html_path.display());
+                let file_url =
+                    crate::browser::html_escape(&format!("file://{}", html_path.display()));
                 format!("{}{}{}{}", prefix, file_url, fragment, suffix)
             } else {
                 caps[0].to_string()
@@ -288,7 +289,10 @@ fn fix_image_paths(html: &str, base_dir: &Path) -> String {
                     .canonicalize()
                     .unwrap_or_else(|_| base_dir.to_path_buf());
                 if resolved.starts_with(&canonical_base) {
-                    let file_url = format!("file://{}", resolved.display());
+                    // The resolved path contains directory names from the
+                    // browsed tree; a `"` in one would end the attribute.
+                    let file_url =
+                        crate::browser::html_escape(&format!("file://{}", resolved.display()));
                     format!(r#"<img {}src="{}"{}>"#, before, file_url, after)
                 } else {
                     caps[0].to_string()
@@ -360,21 +364,46 @@ fn inject_heading_ids(mut events: Vec<pulldown_cmark::Event>) -> Vec<pulldown_cm
 /// as visible escaped text instead of being interpreted as live HTML by the
 /// browser that opens the `file://` preview.
 ///
-/// This does NOT touch `Tag::Image`/`Tag::Link` events, which is how
-/// pulldown-cmark represents real Markdown `![alt](src)`/`[text](url)`
-/// syntax — so `fix_image_paths()` and `fix_md_links()`, which regex-match
-/// the `<img>`/`<a>` tags those tags render into, keep working exactly as
-/// before.
+/// `Tag::Image`/`Tag::Link` events — real Markdown `![alt](src)`/`[text](url)`
+/// syntax — are kept, so `fix_image_paths()` and `fix_md_links()`, which
+/// regex-match the `<img>`/`<a>` tags those render into, keep working. Only a
+/// destination with a script-capable scheme (`javascript:`, `vbscript:`,
+/// `data:`) is replaced by `#`: pulldown-cmark escapes the URL but does not
+/// filter schemes, so `[click](javascript:…)` would run on click.
 fn neutralize_raw_html(events: Vec<pulldown_cmark::Event>) -> Vec<pulldown_cmark::Event> {
-    use pulldown_cmark::Event;
+    use pulldown_cmark::{CowStr, Event, Tag};
 
     events
         .into_iter()
         .map(|event| match event {
             Event::Html(text) | Event::InlineHtml(text) => Event::Text(text),
+            Event::Start(Tag::Link {
+                link_type,
+                dest_url,
+                title,
+                id,
+            }) if is_script_url(&dest_url) => Event::Start(Tag::Link {
+                link_type,
+                dest_url: CowStr::Borrowed("#"),
+                title,
+                id,
+            }),
             other => other,
         })
         .collect()
+}
+
+/// True for URL schemes a browser would execute or render as a document.
+/// Browsers ignore ASCII whitespace and control characters inside the scheme
+/// (`java\tscript:` still runs), so those are dropped before comparing.
+fn is_script_url(url: &str) -> bool {
+    let scheme: String = url
+        .chars()
+        .filter(|c| !c.is_ascii_whitespace() && !c.is_control())
+        .take_while(|&c| c != ':')
+        .collect::<String>()
+        .to_ascii_lowercase();
+    url.contains(':') && matches!(scheme.as_str(), "javascript" | "vbscript" | "data")
 }
 
 #[cfg(test)]
@@ -399,6 +428,59 @@ mod tests {
         let html = md_to_html_fragment("Hello <script>alert(1)</script> World");
         assert!(!html.contains("<script>"), "got: {}", html);
         assert!(html.contains("alert"), "got: {}", html);
+    }
+
+    #[test]
+    fn test_script_scheme_links_are_neutralized() {
+        let html = md_to_html_fragment(
+            "[a](javascript:alert(1)) [b](JavaScript:alert(1)) [c](data:text/html,x) \
+             [ok](https://example.com) [doc](USAGE.md)",
+        );
+        assert!(!html.to_lowercase().contains("javascript:"), "got: {html}");
+        assert!(!html.contains("data:text/html"), "got: {html}");
+        assert!(
+            html.contains(r#"href="https://example.com""#),
+            "got: {html}"
+        );
+        assert!(html.contains(r#"href="USAGE.md""#), "got: {html}");
+    }
+
+    #[test]
+    fn test_is_script_url_ignores_case_and_embedded_whitespace() {
+        assert!(is_script_url("javascript:alert(1)"));
+        assert!(is_script_url(" JaVa\tScRiPt:alert(1)"));
+        assert!(is_script_url("vbscript:x"));
+        assert!(is_script_url("data:text/html;base64,AAAA"));
+        assert!(!is_script_url("https://example.com/javascript:x"));
+        assert!(!is_script_url("javascript.md"));
+        assert!(!is_script_url("#section"));
+    }
+
+    /// The Markdown file's own directory is part of every resolved image path,
+    /// and a `"` in it would end the `src` attribute.
+    #[cfg(unix)]
+    #[test]
+    fn test_image_path_with_quote_in_directory_stays_inside_attribute() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join(r#"x" onerror="alert(1)"#);
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::write(dir.join("pic.png"), b"png").unwrap();
+
+        let out = fix_image_paths(r#"<img src="pic.png" alt="p" />"#, &dir);
+        assert!(!out.contains(r#"" onerror=""#), "got: {out}");
+        assert!(out.contains("&quot; onerror=&quot;"), "got: {out}");
+        assert!(out.contains("pic.png"), "got: {out}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_markdown_title_is_escaped() {
+        let dir = tempfile::tempdir().unwrap();
+        let md = dir.path().join("<svg onload=alert(1)>.md");
+        std::fs::write(&md, "# Hi\n").unwrap();
+        let (html, _tmp) = convert_single_md(&md, &DocumentConfig::default(), "test").unwrap();
+        assert!(!html.contains("<svg onload"), "title became markup");
+        assert!(html.contains("&lt;svg onload=alert(1)&gt;"));
     }
 
     #[test]

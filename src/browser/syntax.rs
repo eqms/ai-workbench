@@ -134,11 +134,14 @@ pub fn text_to_html(
     let size = format_file_size(content.len());
     let lines = content.lines().count();
 
-    // Build final HTML from config-driven template
+    // Build final HTML from config-driven template. The file name comes from
+    // the browsed tree and the language label is derived from it — escape both.
+    let filename = crate::browser::html_escape(filename);
+    let language = crate::browser::html_escape(&language);
     let template = build_syntax_template(doc);
     let html = template
-        .replace("{title}", filename)
-        .replace("{filename}", filename)
+        .replace("{title}", &filename)
+        .replace("{filename}", &filename)
         .replace("{language}", &language)
         .replace("{size}", &size)
         .replace("{lines}", &lines.to_string())
@@ -168,6 +171,21 @@ fn format_file_size(bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A file name is attacker-controlled when the tree came from someone
+    /// else; it lands in `<title>` and the page header.
+    #[cfg(unix)]
+    #[test]
+    fn test_file_name_is_escaped_in_preview_page() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("<img src=x onerror=alert(1)>.rs");
+        std::fs::write(&path, "fn main() {}\n").unwrap();
+
+        let tmp = text_to_html(&path, &DocumentConfig::default(), "test").unwrap();
+        let html = std::fs::read_to_string(tmp.path()).unwrap();
+        assert!(!html.contains("<img src=x"), "file name became markup");
+        assert!(html.contains("&lt;img src=x onerror=alert(1)&gt;.rs"));
+    }
 
     #[test]
     fn test_can_syntax_highlight() {

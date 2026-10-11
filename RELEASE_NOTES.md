@@ -1,5 +1,22 @@
 # Release Notes
 
+## Version 1.14.2 (11.10.2026)
+
+### Fixed
+
+- **[FIX] File names and paths can no longer inject script into the browser
+  preview.** The HTML pages generated for "open in browser" escaped the file
+  content but inserted names verbatim. A file called
+  `<img src=x onerror=alert(1)>.rs`, a Markdown file with such a name, or a
+  directory named `x" onerror="…` that contains a Markdown file with images
+  ran script when the page opened. The page title, file name, language label,
+  resolved image paths and rewritten links between `.md` files are now
+  HTML-escaped.
+- **[FIX] Markdown links with a script scheme are disarmed.** `javascript:`,
+  `vbscript:` and `data:` link targets are replaced by `#` — regardless of
+  case or embedded whitespace such as `java\tscript:`, which browsers ignore
+  too. Ordinary links are unchanged.
+
 ## Version 1.14.1 (11.10.2026)
 
 ### Added
