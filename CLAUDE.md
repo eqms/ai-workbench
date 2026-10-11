@@ -95,7 +95,10 @@ file is the only post-mortem evidence.
 `git_command()` in `src/git/mod.rs` pins `core.fsmonitor`, `core.sshCommand`,
 `core.gitProxy`, `core.pager`, `credential.helper` and `protocol.ext.allow` on
 the command line so repository config cannot override them. Add new git calls
-through this helper, **never** via a bare `Command::new("git")`.
+through this helper, **never** via a bare `Command::new("git")`. Every `fetch`
+and `pull` must additionally pass `UPLOAD_PACK_ARG`: `remote.<name>.uploadpack`
+runs as a shell command for local-path remotes, and since the remote name
+varies it cannot be pinned inside `git_command()`.
 
 The surface is reduced, not closed: `.gitattributes` + `filter.<name>.clean` can
 still execute during `git status`. That is why `git.auto_fetch` defaults to off
