@@ -30,6 +30,10 @@ use std::sync::mpsc;
 ///   that includes `.git/` does, and confirming the "Pull now?" dialog in a tree
 ///   you only navigated into would execute them. Pointed at a path that does not
 ///   exist, so no hook is ever found.
+/// - `remote.<name>.uploadpack` — for a local-path remote, git runs this value
+///   via `sh -c` on fetch and pull. The remote name varies, so it cannot be
+///   pinned with `-c`; [`UPLOAD_PACK_ARG`] overrides it per command instead and
+///   must be passed to every `fetch` and `pull`.
 ///
 /// `core.quotePath=false` and `LC_ALL=C` are not hardening — they make the
 /// output parseable: quoted paths (`"\303\234bung.txt"`) never match a real path,
@@ -77,6 +81,12 @@ fn git_command(repo: &Path) -> Command {
 /// `core.hooksPath` pointed at a path that is never a directory, which makes git
 /// find no hooks at all. Relative, so it stays valid whatever repo we run in.
 const NO_HOOKS_ARG: &str = "core.hooksPath=.git/ai-workbench-hooks-disabled";
+
+/// Overrides any `remote.<name>.uploadpack` from repo config — git otherwise
+/// runs that value as a shell command when fetching from a local-path remote.
+/// The command-line option wins over config; for ssh and https remotes it only
+/// restates the default.
+const UPLOAD_PACK_ARG: &str = "--upload-pack=git-upload-pack";
 
 /// Find the git repository root for a given path
 pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
@@ -258,7 +268,9 @@ pub fn check_remote_changes_async(
 
     std::thread::spawn(move || {
         // Step 1: Fetch from remote (quiet mode, don't merge)
-        let fetch_result = git_command(&repo).args(["fetch", "--quiet"]).output();
+        let fetch_result = git_command(&repo)
+            .args(["fetch", "--quiet", UPLOAD_PACK_ARG])
+            .output();
 
         if let Err(e) = fetch_result {
             let _ = tx.send(GitRemoteCheckResult::Error(e.to_string()));
@@ -303,7 +315,7 @@ pub fn check_remote_changes_async(
 /// Execute git pull (blocking operation)
 pub fn pull(repo_root: &Path) -> Result<String, String> {
     let output = git_command(repo_root)
-        .args(["pull"])
+        .args(["pull", UPLOAD_PACK_ARG])
         .output()
         .map_err(|e| e.to_string())?;
 
@@ -347,6 +359,52 @@ mod tests {
         ] {
             assert!(args.iter().any(|a| a == pinned), "missing -c {pinned}");
         }
+    }
+
+    /// A repository that arrives with its `.git/` (an archive, not a clone) can
+    /// set `remote.origin.uploadpack` to a shell command; for a local-path
+    /// remote git runs it on fetch and pull. Reproduced end to end here.
+    #[cfg(unix)]
+    #[test]
+    fn repo_config_upload_pack_does_not_run_on_fetch_or_pull() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("PWNED");
+        let git = |args: &[&str]| {
+            let status = Command::new("git")
+                .args(["-c", "user.name=t", "-c", "user.email=t@example.invalid"])
+                .args(args)
+                .current_dir(dir.path())
+                .env("GIT_TERMINAL_PROMPT", "0")
+                .output()
+                .unwrap()
+                .status;
+            assert!(status.success(), "git {args:?} failed");
+        };
+        git(&["init", "-q", "src"]);
+        git(&["-C", "src", "commit", "-q", "--allow-empty", "-m", "init"]);
+        git(&["clone", "-q", "src", "victim"]);
+        let payload = format!("touch {}; git-upload-pack", marker.display());
+        git(&[
+            "-C",
+            "victim",
+            "config",
+            "remote.origin.uploadpack",
+            &payload,
+        ]);
+        let victim = dir.path().join("victim");
+
+        git(&["-C", "src", "commit", "-q", "--allow-empty", "-m", "two"]);
+        let result = check_remote_changes_async(&victim, "HEAD").recv().unwrap();
+        assert!(!marker.exists(), "fetch ran the repo's uploadpack command");
+        assert!(
+            !matches!(result, GitRemoteCheckResult::Error(_)),
+            "fetch must still work: {result:?}"
+        );
+
+        git(&["-C", "src", "commit", "-q", "--allow-empty", "-m", "three"]);
+        let pulled = pull(&victim);
+        assert!(!marker.exists(), "pull ran the repo's uploadpack command");
+        assert!(pulled.is_ok(), "pull must still work: {pulled:?}");
     }
 
     /// Localized stderr would break the "no remote configured" classification in
