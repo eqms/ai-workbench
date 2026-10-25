@@ -144,8 +144,10 @@ AI Workbench is versioned from **v1.0.0** onward. For the full, up-to-date chang
 ### Configuration
 
 Configuration files are loaded in priority order:
-1. `./config.yaml` (project-local, highest priority)
+1. `./config.yaml` (project-local, highest priority — only after a one-time `ai-workbench --trust-local-config`)
 2. `~/.config/ai-workbench/config.yaml` (user config)
+
+`ai-workbench --config <file>` loads an explicitly named file instead (read-only: Settings still save to the user config).
 
 ```yaml
 terminal:
@@ -344,8 +346,10 @@ AI Workbench wird ab **v1.0.0** versioniert. Den vollständigen, aktuellen Chang
 ### Konfiguration
 
 Konfigurationsdateien werden in Prioritätsreihenfolge geladen:
-1. `./config.yaml` (projektlokal, höchste Priorität)
+1. `./config.yaml` (projektlokal, höchste Priorität — erst nach einmaligem `ai-workbench --trust-local-config`)
 2. `~/.config/ai-workbench/config.yaml` (Benutzerkonfiguration)
+
+`ai-workbench --config <datei>` lädt stattdessen eine explizit benannte Datei (nur lesend: Einstellungen speichern weiterhin in die Benutzerkonfiguration).
 
 ```yaml
 terminal:
