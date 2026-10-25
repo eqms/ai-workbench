@@ -186,11 +186,9 @@ the last-used AI backend and the date of the daily `claude update` in
 
 ## Conventions
 
-- Commit prefixes: `[ADD]` new features, `[CHG]` modifications, `[FIX]` bug fixes
-- Version headers: increment the version number, update the date (DD.MM.YYYY)
-- UTF-8 everywhere; use Unicode-aware string functions, avoid byte-level
-  operations on UTF-8 strings
-- German for communication, English for code and documentation
+- Never slice a `String` with byte offsets taken from another string (e.g. a
+  lowercased copy); advance by `char::len_utf8`. A `+ 1` in the preview search
+  panicked on `ü`.
 - German typography in generated documents: quotation marks always as the proper
   pair „…“ — never an ASCII `"` as the closing quote (it breaks PDF export)
 - Never commit automatically unless explicitly requested
