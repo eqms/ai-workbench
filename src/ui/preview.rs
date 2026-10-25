@@ -456,19 +456,8 @@ impl PreviewState {
         };
 
         for (line_idx, line) in content.lines().enumerate() {
-            let search_line = if self.search.case_sensitive {
-                line.to_string()
-            } else {
-                line.to_lowercase()
-            };
-
-            let mut start = 0;
-            while let Some(pos) = search_line[start..].find(&query) {
-                let abs_pos = start + pos;
-                self.search
-                    .matches
-                    .push((line_idx, abs_pos, abs_pos + query.len()));
-                start = abs_pos + 1;
+            for (start, end) in find_query_ranges(line, &query, self.search.case_sensitive) {
+                self.search.matches.push((line_idx, start, end));
             }
         }
 
@@ -589,32 +578,31 @@ impl PreviewState {
             return 0;
         }
 
+        let needle = if self.search.case_sensitive {
+            query.clone()
+        } else {
+            query.to_lowercase()
+        };
+
         // Get all lines and perform replacement
         let mut lines: Vec<String> = editor.lines().to_vec();
         let mut total_replacements = 0;
 
         for line in lines.iter_mut() {
-            if self.search.case_sensitive {
-                let count = line.matches(query.as_str()).count();
-                *line = line.replace(query.as_str(), replacement.as_str());
-                total_replacements += count;
-            } else {
-                // Case-insensitive replacement
-                let lower_query = query.to_lowercase();
-                let mut new_line = String::new();
-                let mut last_end = 0;
-                let lower_line = line.to_lowercase();
-
-                while let Some(start) = lower_line[last_end..].find(&lower_query) {
-                    let abs_start = last_end + start;
-                    new_line.push_str(&line[last_end..abs_start]);
-                    new_line.push_str(replacement);
-                    last_end = abs_start + query.len();
-                    total_replacements += 1;
-                }
-                new_line.push_str(&line[last_end..]);
-                *line = new_line;
+            let ranges = find_query_ranges(line, &needle, self.search.case_sensitive);
+            if ranges.is_empty() {
+                continue;
             }
+            let mut new_line = String::with_capacity(line.len());
+            let mut last_end = 0;
+            for &(start, end) in &ranges {
+                new_line.push_str(&line[last_end..start]);
+                new_line.push_str(replacement);
+                last_end = end;
+            }
+            new_line.push_str(&line[last_end..]);
+            total_replacements += ranges.len();
+            *line = new_line;
         }
 
         // Rebuild the editor with modified content
@@ -1738,6 +1726,63 @@ fn get_border_style(
     }
 }
 
+/// Byte ranges of `query` in `line`: non-overlapping, left to right.
+///
+/// For a case-insensitive search `query` must already be lowercased. The
+/// returned ranges always refer to the original `line`, even where lowercasing
+/// changes byte lengths (`İ` becomes `i̇`), so slicing `line` with them cannot
+/// panic. The earlier byte-offset loop advanced by one *byte* after each hit,
+/// which split a multibyte first character (`ü`, `€`) and panicked.
+pub(crate) fn find_query_ranges(
+    line: &str,
+    query: &str,
+    case_sensitive: bool,
+) -> Vec<(usize, usize)> {
+    if query.is_empty() {
+        return Vec::new();
+    }
+    if case_sensitive {
+        return line
+            .match_indices(query)
+            .map(|(start, _)| (start, start + query.len()))
+            .collect();
+    }
+
+    // Lowercase char by char and remember, for every byte of the lowercased
+    // text, the byte offset of the original character it came from.
+    let mut lower = String::with_capacity(line.len());
+    let mut origin: Vec<usize> = Vec::with_capacity(line.len() + 1);
+    for (idx, ch) in line.char_indices() {
+        for lc in ch.to_lowercase() {
+            let before = lower.len();
+            lower.push(lc);
+            origin.extend(std::iter::repeat_n(idx, lower.len() - before));
+        }
+    }
+    origin.push(line.len());
+
+    // A hit is only usable when it starts and ends on an original character
+    // boundary; a match that begins inside a one-to-many expansion is skipped.
+    let is_boundary = |k: usize| k == 0 || k == lower.len() || origin[k] != origin[k - 1];
+
+    let mut ranges = Vec::new();
+    let mut from = 0;
+    while from < lower.len() {
+        let Some(pos) = lower[from..].find(query) else {
+            break;
+        };
+        let start = from + pos;
+        let end = start + query.len();
+        if is_boundary(start) && is_boundary(end) {
+            ranges.push((origin[start], origin[end]));
+            from = end;
+        } else {
+            from = start + lower[start..].chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    ranges
+}
+
 #[cfg(test)]
 mod tests {
     /// The pattern that crashed the UI in v1.11.1: a task-list item following a
@@ -1832,5 +1877,60 @@ mod tests {
         preview.load_file(txt, &syntax);
         preview.enter_edit_mode();
         assert!(preview.editor.is_some(), "text file must stay editable");
+    }
+
+    mod find_query_ranges_tests {
+        use super::super::find_query_ranges;
+
+        #[test]
+        fn ascii_case_sensitive_is_non_overlapping() {
+            assert_eq!(find_query_ranges("aaa", "aa", true), vec![(0, 2)]);
+            assert_eq!(
+                find_query_ranges("abcabc", "bc", true),
+                vec![(1, 3), (4, 6)]
+            );
+            assert!(find_query_ranges("abc", "", true).is_empty());
+        }
+
+        #[test]
+        fn multibyte_first_character_does_not_panic() {
+            // Regression: `start = abs_pos + 1` landed inside the `ü` and the
+            // next slice panicked on the UI thread (Ctrl+F, type "ü").
+            let line = "Grüße über die Brücke";
+            let ranges = find_query_ranges(line, "ü", false);
+            assert_eq!(ranges.len(), 3);
+            for (s, e) in ranges {
+                assert_eq!(&line[s..e], "ü");
+            }
+        }
+
+        #[test]
+        fn case_insensitive_ranges_point_into_original_line() {
+            let line = "Über ÜBER über";
+            let ranges = find_query_ranges(line, "über", false);
+            assert_eq!(ranges.len(), 3);
+            assert_eq!(&line[ranges[0].0..ranges[0].1], "Über");
+            assert_eq!(&line[ranges[1].0..ranges[1].1], "ÜBER");
+            assert_eq!(&line[ranges[2].0..ranges[2].1], "über");
+        }
+
+        #[test]
+        fn lowercase_with_different_byte_length_stays_sliceable() {
+            // `İ` (2 bytes) lowercases to `i̇` (3 bytes); offsets from the
+            // lowercased text must not be applied to the original line.
+            let line = "İstanbul and istanbul";
+            let ranges = find_query_ranges(line, "istanbul", false);
+            for (s, e) in &ranges {
+                assert!(line.is_char_boundary(*s) && line.is_char_boundary(*e));
+            }
+            // The plain-ASCII occurrence is found; the dotted-İ form is not a
+            // byte-exact match of the lowercased query and is skipped safely.
+            assert_eq!(
+                &line[ranges.last().unwrap().0..ranges.last().unwrap().1],
+                "istanbul"
+            );
+            // Searching a query that starts inside the expansion must not loop.
+            assert!(find_query_ranges("İİİ", "\u{307}", false).is_empty());
+        }
     }
 }

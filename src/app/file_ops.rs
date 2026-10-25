@@ -224,7 +224,12 @@ impl App {
                 if let Some(name) = value {
                     if !name.is_empty() && Self::is_safe_filename(&name) {
                         let new_path = self.file_browser.current_dir.join(&name);
-                        if let Err(e) = std::fs::write(&new_path, "") {
+                        // `create_new`: never truncate an existing file of that name.
+                        if let Err(e) = std::fs::OpenOptions::new()
+                            .write(true)
+                            .create_new(true)
+                            .open(&new_path)
+                        {
                             self.set_clipboard_error_flash(format!("Create failed: {}", e));
                         }
                         self.file_browser.refresh();
@@ -253,7 +258,15 @@ impl App {
                             .parent()
                             .map(|p| p.join(&new_name))
                             .unwrap_or_else(|| std::path::PathBuf::from(&new_name));
-                        if let Err(e) = std::fs::rename(&old_path, &new_path) {
+                        // A case-only rename (`Foo` -> `foo`) resolves to the same
+                        // file on case-insensitive file systems and must stay allowed;
+                        // any other existing target must not be replaced silently.
+                        if target_conflict(&old_path, &new_path) == Some(TargetConflict::Exists) {
+                            self.set_clipboard_error_flash(format!(
+                                "Rename failed: {} already exists",
+                                new_path.display()
+                            ));
+                        } else if let Err(e) = std::fs::rename(&old_path, &new_path) {
                             self.set_clipboard_error_flash(format!("Rename failed: {}", e));
                         }
                         self.file_browser.refresh();
@@ -281,11 +294,13 @@ impl App {
                             .unwrap_or_default();
                         if let Some(filename) = source.file_name() {
                             let target = dest_path.join(filename);
-                            if let Err(e) = std::fs::copy(&source, &target) {
-                                crate::update::log_update(&format!(
-                                    "[file_ops] Failed to copy file: {}",
-                                    e
-                                ));
+                            // The dialog is pre-filled with the current directory, so
+                            // plain Enter would copy the file onto itself —
+                            // `fs::copy(a, a)` truncates `a` to 0 bytes.
+                            if let Some(conflict) = target_conflict(&source, &target) {
+                                self.set_clipboard_error_flash(conflict.message("Copy", &target));
+                            } else if let Err(e) = std::fs::copy(&source, &target) {
+                                self.set_clipboard_error_flash(format!("Copy failed: {}", e));
                             } else {
                                 self.file_browser.refresh();
                             }
@@ -301,11 +316,10 @@ impl App {
                             .unwrap_or_default();
                         if let Some(filename) = source.file_name() {
                             let target = dest_path.join(filename);
-                            if let Err(e) = std::fs::rename(&source, &target) {
-                                crate::update::log_update(&format!(
-                                    "[file_ops] Failed to move file: {}",
-                                    e
-                                ));
+                            if let Some(conflict) = target_conflict(&source, &target) {
+                                self.set_clipboard_error_flash(conflict.message("Move", &target));
+                            } else if let Err(e) = std::fs::rename(&source, &target) {
+                                self.set_clipboard_error_flash(format!("Move failed: {}", e));
                             } else {
                                 self.file_browser.refresh();
                             }
@@ -1025,6 +1039,49 @@ impl App {
 
 // --- Unit tests for batch export helpers ---
 
+/// Why a copy, move or rename must not proceed to `target`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TargetConflict {
+    /// `source` and `target` resolve to the same file: the copy dialog was
+    /// confirmed with its pre-filled current directory, or a case-only rename
+    /// on a case-insensitive file system.
+    SameFile,
+    /// A different entry already exists at `target`.
+    Exists,
+}
+
+impl TargetConflict {
+    pub(crate) fn message(self, verb: &str, target: &std::path::Path) -> String {
+        match self {
+            TargetConflict::SameFile => {
+                format!("{} failed: source and target are the same file", verb)
+            }
+            TargetConflict::Exists => {
+                format!("{} failed: {} already exists", verb, target.display())
+            }
+        }
+    }
+}
+
+/// Check `target` before copying, moving or renaming `source` onto it.
+///
+/// `None` means the operation may proceed. `fs::copy(a, a)` truncates `a` to
+/// zero bytes and `fs::rename` replaces an existing target silently, so both
+/// cases are caught here instead of in the file system.
+pub(crate) fn target_conflict(
+    source: &std::path::Path,
+    target: &std::path::Path,
+) -> Option<TargetConflict> {
+    // `symlink_metadata` also sees dangling symlinks, which `exists()` misses.
+    if target.symlink_metadata().is_err() {
+        return None;
+    }
+    match (source.canonicalize(), target.canonicalize()) {
+        (Ok(a), Ok(b)) if a == b => Some(TargetConflict::SameFile),
+        _ => Some(TargetConflict::Exists),
+    }
+}
+
 #[cfg(test)]
 mod batch_export_tests {
     use std::path::{Path, PathBuf};
@@ -1122,5 +1179,66 @@ mod batch_export_tests {
             "expected no md files, found: {:?}",
             md_files
         );
+    }
+
+    mod target_conflict_tests {
+        use super::super::{target_conflict, TargetConflict};
+        use std::fs;
+
+        #[test]
+        fn free_target_is_no_conflict() {
+            let dir = tempfile::tempdir().unwrap();
+            let src = dir.path().join("a.txt");
+            fs::write(&src, "hello").unwrap();
+            assert_eq!(target_conflict(&src, &dir.path().join("b.txt")), None);
+        }
+
+        #[test]
+        fn same_file_through_another_spelling_is_detected() {
+            // The copy dialog is pre-filled with the current directory, so the
+            // default target is the source itself; `fs::copy(a, a)` would
+            // truncate it.
+            let dir = tempfile::tempdir().unwrap();
+            let src = dir.path().join("a.txt");
+            fs::write(&src, "hello").unwrap();
+            let via_dot = dir.path().join(".").join("a.txt");
+            assert_eq!(
+                target_conflict(&src, &via_dot),
+                Some(TargetConflict::SameFile)
+            );
+            assert_eq!(fs::read_to_string(&src).unwrap(), "hello");
+        }
+
+        #[test]
+        fn existing_other_file_is_a_conflict() {
+            let dir = tempfile::tempdir().unwrap();
+            let src = dir.path().join("a.txt");
+            let other = dir.path().join("b.txt");
+            fs::write(&src, "a").unwrap();
+            fs::write(&other, "b").unwrap();
+            assert_eq!(target_conflict(&src, &other), Some(TargetConflict::Exists));
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn dangling_symlink_counts_as_existing() {
+            let dir = tempfile::tempdir().unwrap();
+            let src = dir.path().join("a.txt");
+            fs::write(&src, "a").unwrap();
+            let link = dir.path().join("gone");
+            std::os::unix::fs::symlink(dir.path().join("missing"), &link).unwrap();
+            assert_eq!(target_conflict(&src, &link), Some(TargetConflict::Exists));
+        }
+
+        #[test]
+        fn messages_name_the_operation() {
+            let t = std::path::Path::new("/tmp/x");
+            assert!(TargetConflict::SameFile
+                .message("Copy", t)
+                .starts_with("Copy failed"));
+            assert!(TargetConflict::Exists
+                .message("Move", t)
+                .contains("/tmp/x already exists"));
+        }
     }
 }
