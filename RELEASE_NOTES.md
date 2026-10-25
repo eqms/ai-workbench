@@ -1,5 +1,76 @@
 # Release Notes
 
+## Version 1.15.0 (25.10.2026)
+
+Audit release: two data-loss/crash fixes from the project health audit, an
+event-driven redraw loop, and the dependency backlog (13 open RustSec
+advisories, a `deny.toml` that current cargo-deny no longer parsed).
+
+### Fixed
+
+- **[FIX] "Copy to" no longer empties the source file.** The dialog is
+  pre-filled with the current directory, so confirming it with Enter copied
+  the file onto itself — and `fs::copy(a, a)` truncates `a` to 0 bytes. Copy,
+  Move and Rename now refuse a target that resolves to the source or that
+  already exists, and report it in the footer instead of a silent log line.
+  "New file" uses `create_new`, so it can no longer blank an existing file of
+  the same name. A case-only rename (`Foo` → `foo`) stays allowed.
+- **[FIX] Preview search with a non-ASCII first character crashed the app.**
+  `Ctrl+F` and a query starting with `ü`, `ä` or `€` advanced the match
+  cursor by one byte, landed inside the character and panicked on the UI
+  thread, taking unsaved editor content with it. Search and Replace-all now
+  share one helper that works on character boundaries; case-insensitive
+  matches are mapped back to the original line, so lowercasing that changes
+  byte length (`İ`) cannot produce an invalid slice either. Matches are
+  non-overlapping, as in other editors.
+- **[FIX] Self-update picks the newest release across a major bump.** The
+  update check already reported the highest version; the installer could stop
+  at the current major line. Both now agree.
+
+### Changed
+
+- **[CHG] The event loop paints only when something changed.** It still
+  polls input every 16 ms, but a frame is drawn only after an input event, PTY
+  output (each pane's reader thread raises a flag), the file-browser refresh,
+  or at most every 250 ms as a catch-all for flash messages and background
+  job results. The intro keeps its full frame rate. Measured over 20 s with
+  one idle pane and the same config: CPU drops from about 9 % to 1.5 %, and
+  with the intro off the loop paints about 3.5 frames per second and writes
+  8 KB to the terminal instead of 95 KB.
+- **[CHG] `self_update` 0.44 → 1.3**, which lifts `zip` to 9.x (closes
+  RUSTSEC-2026-0367/0368/0369) and `zipsign-api` to 0.2. Lockfile bumps for
+  `rustls` 0.23.46, `rustls-webpki` 0.103.16, `webpki-roots` 1.0.11,
+  `quinn-proto` 0.11.19, `tokio` 1.54.1 and the yanked `clipboard-win`.
+  `cargo audit` reports no vulnerabilities; remaining warnings are
+  unmaintained transitive crates without a fix (`ttf-parser`, `rustybuzz`,
+  `bincode` 1, `paste`, `unsafe-libyaml`, `yaml-rust`).
+- **[CHG] `deny.toml` works with current cargo-deny again.** The removed
+  `vulnerability`/`notice` keys are gone, `unmaintained` uses the new
+  `workspace` scope, `ttf-parser` (RUSTSEC-2026-0192, dev-only, no fix) is
+  ignored with a reason, and three permissive licenses that transitive crates
+  already carried (`BSL-1.0`, `MPL-2.0`, `CDLA-Permissive-2.0`) are allowed.
+  The CI `deny` job had been failing on the config parse.
+- **[CHG] No more tool probes on a normal start.** Outside the first-run
+  wizard the background dependency check fed exactly one thing, the Linux
+  clipboard warning, yet it ran `--version` on every AI CLI — several of them
+  Node programs that each boot a runtime — plus a `which` per hit, about a
+  dozen subprocesses competing with the AI pane for CPU during startup. A
+  normal start now only looks up the four clipboard helpers on PATH, inline
+  and without a process. The wizard keeps the full check with versions; its
+  path lookup no longer shells out to `which` either.
+- **[CHG] The file-browser refresh spawns one git process instead of four.**
+  Every two seconds the browser re-reads its tree and refreshes the git
+  status, synchronously on the UI thread. Repository root and branch now
+  come from a `.git` walk-up and a read of `HEAD` (worktrees and detached
+  heads included); only `git status --porcelain` is still a subprocess. In
+  the idle profile this refresh was three quarters of the remaining CPU.
+- **[CHG] `--config <file>` works.** The flag was parsed and then ignored;
+  the loader always used `./config.yaml` (if approved) or the home config.
+  An explicitly named file is now loaded as is — read-only, Settings still
+  save to the regular location. The equally dead `--session` flag is gone.
+- **[CHG] Dropped the unused direct dependencies** `typst-library`,
+  `comemo` and `ecow`; they still arrive transitively through `typst`.
+
 ## Version 1.14.2 (11.10.2026)
 
 ### Fixed

@@ -2,10 +2,8 @@
 version = 2
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-vulnerability = "deny"
-unmaintained = "warn"
+unmaintained = "workspace"
 yanked = "warn"
-notice = "warn"
 
 # Kept in sync with .cargo/audit.toml — see that file for the full reachability
 # analysis. Both entries are quick-xml DoS advisories. Since the 30.08.2026
@@ -16,6 +14,10 @@ notice = "warn"
 ignore = [
     "RUSTSEC-2026-0194",  # quick-xml: quadratic duplicate-attribute check
     "RUSTSEC-2026-0195",  # quick-xml: unbounded namespace allocation (DoS)
+    # ttf-parser is unmaintained (no fix). It is a dev-dependency used only by
+    # the font-coverage tests and otherwise reaches us through typst/fontdb/
+    # rustybuzz, which pin it. Re-check when typst moves off it.
+    "RUSTSEC-2026-0192",
 ]
 
 [bans]
@@ -82,4 +84,9 @@ allow = [
     "CC0-1.0",
     "Zlib",
     "OpenSSL",
+    # Permissive licenses that arrived with transitive crates and need no
+    # obligations beyond attribution for a binary distribution:
+    "BSL-1.0",              # clipboard-win, error-code (arboard, Windows only)
+    "MPL-2.0",              # option-ext (dirs); file-level copyleft, unmodified
+    "CDLA-Permissive-2.0",  # webpki-root-certs (Mozilla root store data)
 ]

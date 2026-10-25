@@ -1,6 +1,6 @@
 [package]
 name = "ai-workbench"
-version = "1.14.2"
+version = "1.15.0"
 edition = "2021"
 rust-version = "1.85"
 description = "A Rust TUI multiplexer for AI coding agents (Claude, Codex, Antigravity, OpenCode, Pi) with file browser, preview and embedded PTY panes"
@@ -26,11 +26,12 @@ shlex = "1.3"
 arboard = { version = "3.6", features = ["wayland-data-control"] }  # Cross-platform clipboard (X11 + Wayland)
 regex = "1.12"
 libc = "0.2"
-self_update = { version = "0.44", default-features = false, features = [
+self_update = { version = "1.3", default-features = false, features = [
+    "github",
     "reqwest",
     "archive-tar",
     "archive-zip",
-    "compression-flate2",
+    "compression-tar-gz",
     "compression-zip-deflate",
     "rustls",
     "signatures"
@@ -43,14 +44,11 @@ sha2 = "0.10"  # Content-pinning for the repository-local config trust allowlist
 # Gated behind `pdf-export` feature (enabled by default).
 typst = { version = "0.14.2", optional = true }
 typst-pdf = { version = "0.14.2", optional = true }
-typst-library = { version = "0.14.2", optional = true }
 typst-kit = { version = "0.14.2", default-features = false, features = ["fonts"], optional = true }
-comemo = { version = "0.4", optional = true }  # Memoization required by typst::World trait
-ecow = { version = "0.2", optional = true }    # EcoString/EcoVec used in typst API
 
 [dev-dependencies]
 ttf-parser = "0.25"  # Font codepoint coverage tests (transitive dep via typst already in Cargo.lock)
 
 [features]
 default = ["pdf-export"]
-pdf-export = ["dep:typst", "dep:typst-pdf", "dep:typst-library", "dep:typst-kit", "dep:comemo", "dep:ecow"]
+pdf-export = ["dep:typst", "dep:typst-pdf", "dep:typst-kit"]

@@ -44,9 +44,10 @@ pub fn check_for_update_with_version(current_version: &str) -> UpdateCheckResult
                 // The `is_empty()` guard is subsumed: max_by returns None on empty input,
                 // handled by the `let Some` below.
                 let latest = releases
+                    .all()
                     .iter()
                     .filter_map(|r| {
-                        let tag = r.version.strip_prefix('v').unwrap_or(&r.version);
+                        let tag = r.version().strip_prefix('v').unwrap_or(r.version());
                         Version::parse(tag).ok().map(|v| (v, r))
                     })
                     .max_by(|(va, _), (vb, _)| va.cmp(vb))
@@ -57,7 +58,7 @@ pub fn check_for_update_with_version(current_version: &str) -> UpdateCheckResult
                     return UpdateCheckResult::NoReleasesFound;
                 };
 
-                let target_version = &latest.version;
+                let target_version = latest.version();
 
                 super::log_update(&format!("[check] GitHub version: {}", target_version));
 
@@ -74,11 +75,8 @@ pub fn check_for_update_with_version(current_version: &str) -> UpdateCheckResult
                         current_normalized, target_normalized
                     ));
                     UpdateCheckResult::UpdateAvailable {
-                        version: target_version.clone(),
-                        release_notes: latest
-                            .body
-                            .as_ref()
-                            .map(|n| filter_release_notes_for_platform(n)),
+                        version: target_version.to_string(),
+                        release_notes: latest.body().map(filter_release_notes_for_platform),
                     }
                 } else {
                     super::log_update("[check] Current version is newer than latest release");

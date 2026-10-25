@@ -445,8 +445,10 @@ mod tests {
 
     #[test]
     fn backend_radio_navigation_wraps() {
-        let mut state = WizardState::default();
-        state.selected_backend = AiBackend::Claude;
+        let mut state = WizardState {
+            selected_backend: AiBackend::Claude,
+            ..Default::default()
+        };
         state.prev_backend();
         assert_eq!(state.selected_backend, AiBackend::OllamaPi);
         state.next_backend();

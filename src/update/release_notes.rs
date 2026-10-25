@@ -19,12 +19,13 @@ pub fn fetch_release_notes(version: &str) -> Option<String> {
     let version_normalized = version.strip_prefix('v').unwrap_or(version);
 
     releases
+        .into_vec()
         .into_iter()
         .find(|r| {
-            let release_version = r.version.strip_prefix('v').unwrap_or(&r.version);
+            let release_version = r.version().strip_prefix('v').unwrap_or(r.version());
             release_version == version_normalized
         })
-        .and_then(|r| r.body)
+        .and_then(|r| r.body().map(str::to_string))
 }
 
 /// Filter release notes to show only downloads for the current platform

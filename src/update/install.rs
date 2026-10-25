@@ -108,6 +108,9 @@ pub fn perform_update_sync() -> UpdateResult {
         .bin_name(BIN_NAME)
         .target(target)
         .current_version(CURRENT_VERSION)
+        // Install the newest release overall, matching what check.rs reports.
+        // The default `Compatible` strategy would stop at the current major.
+        .update_strategy(self_update::update::UpdateStrategy::Latest)
         .verifying_keys([RELEASE_PUBLIC_KEY])
         .show_download_progress(false)
         .show_output(false)
@@ -184,7 +187,7 @@ pub fn perform_update_to_version_sync(target_version: &str) -> UpdateResult {
         .repo_name(REPO_NAME)
         .bin_name(BIN_NAME)
         .target(target)
-        .target_version_tag(&target_tag)
+        .release_tag(&target_tag)
         .current_version(CURRENT_VERSION)
         .verifying_keys([RELEASE_PUBLIC_KEY])
         .show_download_progress(false)
