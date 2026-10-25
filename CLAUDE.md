@@ -34,8 +34,10 @@ and dialogs; all other panes are backend-agnostic.
 - **Platform**: Linux + macOS only. XRDP and Kitty are first-class targets.
 - **Compatibility**: the existing `config.yaml` format must be preserved or
   migrated transparently — users rely on persistent settings.
-- **Performance**: 16 ms event-loop polling; PTY reader threads must never block
-  the UI; clipboard work stays off the UI thread.
+- **Performance**: 16 ms event-loop polling, but frames are painted only on
+  change (input, PTY output flag, refresh tick, 250 ms catch-all) — new
+  time-driven UI must either set `redraw` or live with that cadence; PTY reader
+  threads must never block the UI; clipboard work stays off the UI thread.
 
 ## Git Push Strategy
 

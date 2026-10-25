@@ -34,7 +34,13 @@ conventions with teeth, hard prohibitions) stay in `CLAUDE.md` — not here.
 - Async jobs (update check, git remote check, PDF export) use
   `std::sync::mpsc` channels wrapped in `JobState<T>`, polled each event-loop
   iteration with `try_recv()`. No blocking inside the loop.
-- 16 ms poll timeout gives ~60 fps UI refresh rate.
+- The loop polls input with a 16 ms timeout but only paints a frame when
+  something changed: an input event, PTY output (each `PseudoTerminal` raises
+  an `output_pending` flag from its reader thread, drained via
+  `take_output_pending()`), the file-browser refresh, or — as a catch-all for
+  time-driven state such as flash messages and background job results — at
+  most every 250 ms. The intro animation keeps the full frame rate while it is
+  visible. Unconditional 60 fps redraws cost ~12 % CPU in idle.
 
 ## Layers
 

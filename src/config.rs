@@ -1015,6 +1015,15 @@ pub fn load_config() -> Result<Config> {
     load_config_checked().map(|(config, _)| config)
 }
 
+/// Load an explicitly named config file (`--config <path>`), bypassing the
+/// local-config trust check and the home-directory lookup.
+pub fn load_config_from(path: &Path) -> Result<Config> {
+    let contents = fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("cannot read config {}: {}", path.display(), e))?;
+    serde_yaml_ng::from_str(&contents)
+        .map_err(|e| anyhow::anyhow!("{} is not a valid config: {}", path.display(), e))
+}
+
 /// Like [`load_config`], but also reports what happened to `./config.yaml`
 /// so the caller can surface a warning.
 pub fn load_config_checked() -> Result<(Config, LocalConfigStatus)> {

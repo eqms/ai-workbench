@@ -189,7 +189,6 @@ pub struct App {
     pub dependency_report: crate::setup::DependencyReport,
     /// Async job: startup dependency check (~12-20 subprocess spawns) — runs
     /// on a background thread so it never delays the first frame.
-    pub dependency_check_job: JobState<crate::setup::DependencyReport>,
     // Temp files created for browser previews (auto-deleted on drop via NamedTempFile)
     pub temp_preview_files: Vec<tempfile::NamedTempFile>,
     // Export format chooser (Ctrl+X on Markdown files or directories)
@@ -412,24 +411,22 @@ impl App {
             clipboard_warning_dismissed: false,
             ssh_image_paste_hint: None,
             dependency_report: crate::setup::DependencyReport::default(),
-            dependency_check_job: JobState::default(),
             temp_preview_files: Vec::new(),
             export_chooser: crate::types::ExportChooserState::default(),
             export_job: JobState::default(),
             export_browser: None,
         };
 
-        // Dependency check: the ~12-20 sequential subprocess spawns were the
-        // dominant cost of the startup black screen, so the check runs on a
-        // background thread (poll_dependency_check in the event loop). Only
-        // the first-run wizard needs the result synchronously — there the
-        // wizard's own check is reused instead of starting a duplicate job.
+        // Dependency check: only the first-run wizard needs the full report
+        // with versions (its own synchronous check is reused). Every other
+        // start needs just the clipboard helpers for the Linux warning — four
+        // PATH lookups, no subprocess (see app/dependency_check.rs).
         if should_open_wizard {
             app.wizard.open(app.backend);
             app.dependency_report = app.wizard.deps.clone();
             app.seed_clipboard_warning();
         } else {
-            app.start_dependency_check();
+            app.run_dependency_check();
         }
 
         app.update_preview();
@@ -495,6 +492,17 @@ impl App {
         // draining before the first frame is ever visible.
         self.intro.restart();
 
+        // Redraw policy. The loop still polls input every 16 ms, but a frame is
+        // only painted when something can have changed: an input event, PTY
+        // output, the file-browser refresh, or — as a catch-all for
+        // time-driven state such as flash messages, spinners and background
+        // job results — at most every IDLE_REDRAW. The intro animation keeps
+        // the full frame rate while it is visible. Painting unconditionally
+        // at 60 fps cost about 12 % CPU with the app sitting idle.
+        const IDLE_REDRAW: std::time::Duration = std::time::Duration::from_millis(250);
+        let mut redraw = true;
+        let mut last_draw = std::time::Instant::now();
+
         while !self.should_quit {
             // Check for exited PTYs and restart them with a shell
             self.check_and_restart_exited_ptys();
@@ -508,14 +516,12 @@ impl App {
                     // Also check if preview file was modified externally
                     self.preview.reload_if_changed(&self.syntax_manager);
                     self.last_refresh = std::time::Instant::now();
+                    redraw = true;
                 }
             }
 
             // Poll for async git remote check results
             self.poll_git_check();
-
-            // Poll for async startup dependency check
-            self.poll_dependency_check();
 
             // Poll for async PDF export result
             self.poll_export_result();
@@ -530,9 +536,25 @@ impl App {
             // Auto-dismiss the startup intro once its duration has elapsed.
             self.intro.tick();
 
-            terminal.draw(|frame| self.draw(frame))?;
+            // Drain every pane's flag (no short-circuit) so one frame covers
+            // all panes that produced output since the last draw.
+            for pty in self.terminals.values() {
+                if pty.take_output_pending() {
+                    redraw = true;
+                }
+            }
+            if self.intro.visible || last_draw.elapsed() >= IDLE_REDRAW {
+                redraw = true;
+            }
+
+            if redraw {
+                terminal.draw(|frame| self.draw(frame))?;
+                last_draw = std::time::Instant::now();
+                redraw = false;
+            }
 
             if event::poll(std::time::Duration::from_millis(16))? {
+                redraw = true;
                 match event::read()? {
                     Event::Mouse(mouse) => {
                         let size = terminal.size()?;

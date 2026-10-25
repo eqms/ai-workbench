@@ -1,31 +1,20 @@
-//! Async startup dependency check.
+//! Startup dependency check.
 //!
-//! `DependencyReport::check()` spawns ~12-20 subprocesses sequentially
-//! (tool `--version` probes plus `which` lookups). Running it synchronously
-//! in `App::new()` was the largest contributor to the startup black screen,
-//! so it is dispatched to a background thread and polled from the event loop
-//! like the other `JobState` jobs.
+//! Outside the first-run wizard the report has exactly one consumer: the
+//! Linux clipboard warning, which needs to know whether xclip / xsel /
+//! wl-copy / wl-paste exist. That is four PATH lookups, so it runs inline.
+//! The full `DependencyReport::check()` — `--version` probes of every AI CLI,
+//! several of them Node programs — stays reserved for the wizard, which shows
+//! the versions; running it in the background on every start cost seconds of
+//! CPU while the AI pane was booting.
 
 use crate::setup::DependencyReport;
 
-use super::{App, JobState, PollOutcome};
+use super::App;
 
 impl App {
-    pub(super) fn start_dependency_check(&mut self) {
-        self.dependency_check_job = JobState::running(DependencyReport::check_async());
-    }
-
-    /// Poll for the async dependency check result. On completion, store the
-    /// report and seed the Linux clipboard warning banner.
-    pub(super) fn poll_dependency_check(&mut self) {
-        let report = match self.dependency_check_job.poll() {
-            PollOutcome::Ready(report) => report,
-            // Disconnected: worker thread died before sending — keep the
-            // default (empty) report; F12 help simply shows nothing found.
-            PollOutcome::Disconnected | PollOutcome::Pending => return,
-        };
-
-        self.dependency_report = report;
+    pub(super) fn run_dependency_check(&mut self) {
+        self.dependency_report = DependencyReport::clipboard_only();
         self.seed_clipboard_warning();
     }
 

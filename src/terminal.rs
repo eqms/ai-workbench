@@ -170,6 +170,10 @@ pub struct PseudoTerminal {
     pub master: Box<dyn portable_pty::MasterPty + Send>,
     /// Flag indicating if the PTY process has exited (reader thread got EOF)
     pub exited: Arc<AtomicBool>,
+    /// Set by the reader thread whenever it fed bytes to the parser; cleared
+    /// by `take_output_pending()`. Lets the event loop skip frames in which
+    /// no pane changed.
+    output_pending: Arc<AtomicBool>,
 }
 
 impl PseudoTerminal {
@@ -189,6 +193,9 @@ impl PseudoTerminal {
             PtyCallbacks::new(),
         )));
         let exited = Arc::new(AtomicBool::new(false));
+        // Starts set so the first frame after spawning paints the pane.
+        let output_pending = Arc::new(AtomicBool::new(true));
+        let output_pending_clone = output_pending.clone();
         let mut reader = pair.master.try_clone_reader()?;
         let parser_clone = parser.clone();
         let exited_clone = exited.clone();
@@ -231,6 +238,7 @@ impl PseudoTerminal {
                     Ok(0) => {
                         // EOF - process has exited
                         exited_clone.store(true, Ordering::SeqCst);
+                        output_pending_clone.store(true, Ordering::Release);
                         break;
                     }
                     Ok(n) => {
@@ -239,6 +247,7 @@ impl PseudoTerminal {
                             parser.process(&buffer[..n]);
                             parser.callbacks_mut().drain_responses()
                         };
+                        output_pending_clone.store(true, Ordering::Release);
                         if !responses.is_empty() {
                             if let Ok(mut w) = writer_clone.lock() {
                                 for response in responses {
@@ -251,6 +260,7 @@ impl PseudoTerminal {
                     Err(_) => {
                         // Error - process probably exited
                         exited_clone.store(true, Ordering::SeqCst);
+                        output_pending_clone.store(true, Ordering::Release);
                         break;
                     }
                 }
@@ -262,7 +272,15 @@ impl PseudoTerminal {
             writer,
             master: pair.master,
             exited,
+            output_pending,
         })
+    }
+
+    /// True once per batch of PTY output since the last call. The reader
+    /// thread raises the flag after every `parser.process()`; the event loop
+    /// drains it each iteration and only redraws when a pane reported output.
+    pub fn take_output_pending(&self) -> bool {
+        self.output_pending.swap(false, Ordering::AcqRel)
     }
 
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {

@@ -24,6 +24,18 @@ pub struct ClipboardHelpers {
 }
 
 impl ClipboardHelpers {
+    /// Locate the helpers on PATH. Pure-Rust lookup: they are plain binaries,
+    /// never shell aliases, so no `--version` probe and no interactive-shell
+    /// fallback (which once activated fish job control at startup).
+    pub fn detect() -> Self {
+        Self {
+            xclip: check_binary("xclip"),
+            xsel: check_binary("xsel"),
+            wl_copy: check_binary("wl-copy"),
+            wl_paste: check_binary("wl-paste"),
+        }
+    }
+
     /// At least one X11 selection helper is present.
     pub fn linux_x11_ok(&self) -> bool {
         self.xclip.found || self.xsel.found
@@ -68,30 +80,20 @@ impl DependencyReport {
             ollama_cli: check_command("ollama", &["--version"], false),
             lazygit: check_command("lazygit", &["--version"], false),
             shells: check_available_shells(),
-            clipboard_helpers: ClipboardHelpers {
-                // Use pure-Rust PATH lookup for clipboard helpers — they are
-                // simple binaries, never shell aliases, so we don't need the
-                // interactive-shell fallback that `check_command` does. On
-                // macOS the helpers are typically absent, and triggering 4×
-                // `fish -i -c "..."` fallbacks at startup activated job
-                // control and corrupted the terminal state on next launch.
-                xclip: check_binary("xclip"),
-                xsel: check_binary("xsel"),
-                wl_copy: check_binary("wl-copy"),
-                wl_paste: check_binary("wl-paste"),
-            },
+            clipboard_helpers: ClipboardHelpers::detect(),
         }
     }
 
-    /// Run `check()` on a background thread. The receiver delivers the report
-    /// once; poll it via `JobState` from the event loop so the ~12-20
-    /// sequential subprocess spawns never block startup rendering.
-    pub fn check_async() -> std::sync::mpsc::Receiver<Self> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(Self::check());
-        });
-        rx
+    /// The report the regular (non-wizard) startup needs: only the clipboard
+    /// helpers, which feed the Linux clipboard warning. Pure PATH lookups, no
+    /// subprocess — the full `check()` costs several seconds of CPU because
+    /// every `<cli> --version` of the Node-based agents boots a Node runtime,
+    /// and that competed with the AI pane's own startup.
+    pub fn clipboard_only() -> Self {
+        Self {
+            clipboard_helpers: ClipboardHelpers::detect(),
+            ..Self::default()
+        }
     }
 
     /// The CLI status for a given AI backend.
@@ -227,33 +229,11 @@ fn extract_version(stdout: &[u8], name: &str) -> Option<String> {
     Some(first_line)
 }
 
-/// Find executable path using `which` (Unix) or `where` (Windows)
+/// Find the executable's path with the pure-Rust PATH walk (no `which`
+/// subprocess; the binary was just executed successfully, so it is on PATH).
 fn find_executable_path(name: &str) -> Option<PathBuf> {
-    #[cfg(windows)]
-    let output = Command::new("where").arg(name).output().ok()?;
-    #[cfg(not(windows))]
-    let output = Command::new("which").arg(name).output().ok()?;
-
-    if output.status.success() {
-        // `where` on Windows may return multiple lines (one per match); take the first.
-        let raw = String::from_utf8_lossy(&output.stdout);
-        let path_str = raw.lines().next().unwrap_or("").trim().to_string();
-        if !path_str.is_empty() {
-            // Handle Fish/Zsh alias output like "claude: aliased to /path/to/claude"
-            if path_str.contains("aliased to ") {
-                if let Some(actual_path) = path_str.split("aliased to ").nth(1) {
-                    let path = PathBuf::from(actual_path.trim());
-                    if path.exists() {
-                        return Some(path);
-                    }
-                }
-            }
-            // Standard path output
-            let path = PathBuf::from(&path_str);
-            if path.exists() && path.is_absolute() {
-                return Some(path);
-            }
-        }
+    if let Some(path) = crate::clipboard::which(name) {
+        return Some(path);
     }
 
     // Fallback: Check common Claude installation locations
@@ -318,14 +298,25 @@ mod tests {
     }
 
     #[test]
-    fn test_check_async_delivers_report() {
-        let rx = DependencyReport::check_async();
-        let report = rx
-            .recv_timeout(std::time::Duration::from_secs(30))
-            .expect("background check should deliver a report");
-        // Same expectation as test_check_command_finds_git_directly: git is
-        // required and present in every dev environment running the tests.
-        assert!(report.git.found, "git should be found by async check");
+    fn clipboard_only_report_skips_tool_probes() {
+        let report = DependencyReport::clipboard_only();
+        // No `--version` probes: every tool stays at its default (not found),
+        // while the clipboard helpers were looked up.
+        assert!(!report.git.found);
+        assert!(!report.claude_cli.found);
+        assert!(report.shells.is_empty());
+        assert_eq!(report.clipboard_helpers.xclip.name, "xclip");
+        assert_eq!(report.clipboard_helpers.wl_paste.name, "wl-paste");
+    }
+
+    #[test]
+    fn find_executable_path_uses_pure_rust_lookup() {
+        // `git` is on PATH in every environment that runs the tests; the
+        // lookup must return an absolute, existing path without spawning
+        // `which`.
+        let path = find_executable_path("git").expect("git on PATH");
+        assert!(path.is_absolute() && path.exists());
+        assert!(find_executable_path("nonexistent_command_12345").is_none());
     }
 
     #[test]

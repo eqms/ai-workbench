@@ -37,11 +37,11 @@ struct Args {
     #[arg(value_name = "BACKEND")]
     mode: Option<String>,
 
+    /// Load this config file instead of ./config.yaml or
+    /// ~/.config/ai-workbench/config.yaml. Read-only: Settings (F8) still
+    /// save to the regular location.
     #[arg(short, long)]
     config: Option<PathBuf>,
-
-    #[arg(short, long)]
-    session: Option<String>,
 
     /// Check for updates and exit (without starting TUI)
     #[arg(long)]
@@ -646,10 +646,14 @@ fn main() -> Result<()> {
         .enable_all()
         .build()
         .expect("Failed to create tokio runtime")
-        .block_on(async_main(fake_version, args.mode))
+        .block_on(async_main(fake_version, args.mode, args.config))
 }
 
-async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Result<()> {
+async fn async_main(
+    fake_version: Option<String>,
+    mode: Option<String>,
+    config_path: Option<PathBuf>,
+) -> Result<()> {
     // Panic hook. Every panic is written to the crash log; only a panic on the
     // rendering thread may touch the terminal.
     //
@@ -688,7 +692,16 @@ async fn async_main(fake_version: Option<String>, mode: Option<String>) -> Resul
         );
     }
 
-    let (config, local_config_status) = config::load_config_checked()?;
+    let (config, local_config_status) = match config_path.as_deref() {
+        // An explicitly named file is the user's own choice — no local-config
+        // approval applies, and a missing or invalid file is an error, not a
+        // silent fallback to defaults.
+        Some(path) => (
+            config::load_config_from(path)?,
+            config::LocalConfigStatus::Absent,
+        ),
+        None => config::load_config_checked()?,
+    };
     {
         let mut err = std::io::stderr();
         let _ = writeln!(err, "  config loaded ({} ms)", t0.elapsed().as_millis());

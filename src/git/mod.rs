@@ -90,19 +90,48 @@ const UPLOAD_PACK_ARG: &str = "--upload-pack=git-upload-pack";
 
 /// Find the git repository root for a given path
 pub fn find_repo_root(path: &Path) -> Option<PathBuf> {
-    let path = if path.is_file() { path.parent()? } else { path };
-
-    let output = git_command(path)
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .ok()?;
-
-    if output.status.success() {
-        let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        Some(PathBuf::from(root))
-    } else {
-        None
+    // Walk up until a `.git` entry appears — a directory for an ordinary
+    // checkout, a file for worktrees and submodules. This is git's own
+    // discovery rule and needs no subprocess: the file browser calls this on
+    // every refresh, where `git rev-parse --show-toplevel` was one of four
+    // git spawns every two seconds. Like `--show-toplevel`, the result has
+    // symlinks resolved.
+    let start = if path.is_file() { path.parent()? } else { path };
+    let start = start.canonicalize().ok()?;
+    let mut dir = start.as_path();
+    loop {
+        if dir.join(".git").exists() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
     }
+}
+
+/// Current branch read from `HEAD` without spawning git. Returns `"HEAD"`
+/// for a detached head (as `rev-parse --abbrev-ref HEAD` does) and `None`
+/// only when the file cannot be read or has an unexpected shape, so callers
+/// can fall back to [`get_current_branch`].
+pub fn read_head_branch(repo_root: &Path) -> Option<String> {
+    let dot_git = repo_root.join(".git");
+    let git_dir = if dot_git.is_file() {
+        // Worktree or submodule: `.git` is a one-line "gitdir: <path>" file.
+        let contents = std::fs::read_to_string(&dot_git).ok()?;
+        let target = PathBuf::from(contents.strip_prefix("gitdir:")?.trim());
+        if target.is_absolute() {
+            target
+        } else {
+            repo_root.join(target)
+        }
+    } else {
+        dot_git
+    };
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    let head = head.trim();
+    if let Some(branch) = head.strip_prefix("ref: refs/heads/") {
+        return Some(branch.to_string());
+    }
+    let is_hash = head.len() >= 7 && head.chars().all(|c| c.is_ascii_hexdigit());
+    is_hash.then(|| "HEAD".to_string())
 }
 
 /// Get the current branch name for a repository
@@ -170,8 +199,10 @@ pub fn get_status_for_directory(
         return (HashMap::new(), None);
     };
 
-    // Get branch name
-    let branch = get_current_branch(&repo_root).unwrap_or_else(|| "HEAD".to_string());
+    // Branch name: read from HEAD; git itself only as a fallback.
+    let branch = read_head_branch(&repo_root)
+        .or_else(|| get_current_branch(&repo_root))
+        .unwrap_or_else(|| "HEAD".to_string());
 
     // Parse git status
     let statuses = parse_git_status(&repo_root);
@@ -331,11 +362,68 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_find_repo_root() {
-        // Should find repo root from current directory (this test file is in a git repo)
-        let result = find_repo_root(Path::new("."));
-        // May or may not be in a git repo depending on where tests run
-        assert!(result.is_some() || result.is_none());
+    fn find_repo_root_walks_up_to_the_dot_git_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let nested = repo.join("src").join("deep");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir(repo.join(".git")).unwrap();
+        let file = nested.join("a.rs");
+        std::fs::write(&file, "").unwrap();
+
+        let expected = repo.canonicalize().unwrap();
+        assert_eq!(find_repo_root(&nested), Some(expected.clone()));
+        assert_eq!(find_repo_root(&file), Some(expected));
+        // A `.git` *file* (worktree / submodule) counts as well.
+        let wt = dir.path().join("wt");
+        std::fs::create_dir(&wt).unwrap();
+        std::fs::write(wt.join(".git"), "gitdir: /elsewhere\n").unwrap();
+        assert_eq!(find_repo_root(&wt), Some(wt.canonicalize().unwrap()));
+    }
+
+    #[test]
+    fn find_repo_root_outside_any_repo_is_none() {
+        // A fresh temp dir under /tmp or $TMPDIR has no `.git` above it.
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        let has_git_above = plain
+            .canonicalize()
+            .unwrap()
+            .ancestors()
+            .any(|a| a.join(".git").exists());
+        if !has_git_above {
+            assert_eq!(find_repo_root(&plain), None);
+        }
+    }
+
+    #[test]
+    fn read_head_branch_handles_ref_detached_and_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(repo.join(".git")).unwrap();
+
+        std::fs::write(repo.join(".git/HEAD"), "ref: refs/heads/feature/x\n").unwrap();
+        assert_eq!(read_head_branch(&repo).as_deref(), Some("feature/x"));
+
+        std::fs::write(
+            repo.join(".git/HEAD"),
+            "0123456789abcdef0123456789abcdef01234567\n",
+        )
+        .unwrap();
+        assert_eq!(read_head_branch(&repo).as_deref(), Some("HEAD"));
+
+        std::fs::write(repo.join(".git/HEAD"), "garbage").unwrap();
+        assert_eq!(read_head_branch(&repo), None);
+
+        // Worktree: `.git` file points at the per-worktree git dir.
+        let gitdir = repo.join(".git/worktrees/wt");
+        std::fs::create_dir_all(&gitdir).unwrap();
+        std::fs::write(gitdir.join("HEAD"), "ref: refs/heads/wt-branch\n").unwrap();
+        let wt = dir.path().join("wt");
+        std::fs::create_dir(&wt).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", gitdir.display())).unwrap();
+        assert_eq!(read_head_branch(&wt).as_deref(), Some("wt-branch"));
     }
 
     /// Every `-c` override we rely on must actually reach the command line;
