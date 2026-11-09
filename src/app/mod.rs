@@ -117,6 +117,9 @@ pub struct App {
     pub claude_permission_mode: ClaudePermissionMode,
     // Whether Claude PTY is pending (waiting for permission mode selection)
     pub claude_pty_pending: bool,
+    // AI pane instance whose program status reports (OSC 7501) were relayed
+    // to the host terminal; used to clear them once that agent is gone.
+    program_status_source: Option<usize>,
     // Double-click tracking
     last_click_time: std::time::Instant,
     last_click_idx: Option<usize>,
@@ -274,7 +277,7 @@ impl App {
             let claude_cmd = Self::build_ai_command(&config, backend, &opts);
             claude_command_str = claude_cmd.join(" ");
 
-            match PseudoTerminal::new(&claude_cmd, rows, cols, &cwd) {
+            match PseudoTerminal::spawn(&claude_cmd, rows, cols, &cwd, true) {
                 Ok(pty) => {
                     terminals.insert(PaneId::Claude, pty);
                 }
@@ -380,6 +383,7 @@ impl App {
             backend_switch,
             claude_permission_mode,
             claude_pty_pending,
+            program_status_source: None,
             last_click_time: std::time::Instant::now(),
             last_click_idx: None,
             terminal_selection: TerminalSelection::default(),
@@ -486,6 +490,32 @@ impl App {
         }
     }
 
+    /// Forward program status reports (OSC 7501) from the AI pane to the host
+    /// terminal, and clear them once the agent that sent them is gone
+    /// (exited, restarted or replaced by a backend switch). Runs on the UI
+    /// thread between frames, so a sequence never lands inside a frame.
+    fn relay_program_status(&mut self) {
+        let current = self
+            .terminals
+            .get(&PaneId::Claude)
+            .map(|pty| (pty.instance_id(), pty.has_exited(), pty.take_host_reports()));
+
+        if let Some(source) = self.program_status_source {
+            let still_there = matches!(current, Some((id, false, _)) if id == source);
+            if !still_there {
+                crate::program_status::write_to_host(&[crate::program_status::clear_sequence()]);
+                self.program_status_source = None;
+            }
+        }
+
+        if let Some((id, _, reports)) = current {
+            if !reports.is_empty() {
+                crate::program_status::write_to_host(&reports);
+                self.program_status_source = Some(id);
+            }
+        }
+    }
+
     pub fn run(mut self, mut terminal: DefaultTerminal) -> Result<bool> {
         // Re-anchor the intro clock: IntroState was constructed partway
         // through App::new, so without this the animation budget starts
@@ -504,6 +534,10 @@ impl App {
         let mut last_draw = std::time::Instant::now();
 
         while !self.should_quit {
+            // Relay the AI pane's program status reports before a possible
+            // restart below, so an exiting agent's last report still arrives.
+            self.relay_program_status();
+
             // Check for exited PTYs and restart them with a shell
             self.check_and_restart_exited_ptys();
 
@@ -600,6 +634,10 @@ impl App {
             }
         }
         // temp_preview_files (Vec<NamedTempFile>) auto-delete on App drop
+
+        if self.program_status_source.take().is_some() {
+            crate::program_status::write_to_host(&[crate::program_status::clear_sequence()]);
+        }
 
         Ok(self.should_restart)
     }

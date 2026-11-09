@@ -435,6 +435,20 @@ bridge when it cannot read the system clipboard under XRDP. Run
 relevant environment variables, and a copy/paste roundtrip test. Override the
 strategy with `CLAUDE_WORKBENCH_CLIPBOARD=osc52|arboard|subprocess`.
 
+### Agent Status in Terminal Hosts (Herdr)
+
+Hosts such as Herdr show coding agents in a sidebar. An agent tells its
+terminal what it is doing through program status reports (OSC 7501), and
+Claude Code sends them only when the terminal answers its support query.
+
+At startup the workbench asks the outer terminal whether it supports the
+protocol (`program status probe` in `update.log`). If it does, the AI pane
+answers the agent's query and forwards its reports to the host, so the agent
+appears in the host's list with its state. When the agent exits, is restarted
+or replaced via F8, or the workbench quits, its entry is cleared. Only the AI
+pane is relayed; on terminals without support nothing changes and no extra
+bytes are sent.
+
 ### Crash Log
 
 If the app ever misbehaves — a pane stops updating, or the display falls apart —
@@ -895,6 +909,21 @@ wenn diese unter XRDP das System-Clipboard nicht lesen kann. `ai-workbench
 --clipboard-diag` zeigt die aktive Strategie, Helfer-Pfade, relevante Umgebungs-
 variablen und einen Copy/Paste-Roundtrip-Test. Strategie überschreibbar via
 `CLAUDE_WORKBENCH_CLIPBOARD=osc52|arboard|subprocess`.
+
+### Agent-Status in Terminal-Hosts (Herdr)
+
+Hosts wie Herdr zeigen Coding-Agenten in einer Seitenleiste. Ein Agent meldet
+seinem Terminal über Program-Status-Meldungen (OSC 7501), was er gerade tut,
+und Claude Code sendet sie nur, wenn das Terminal auf seine Anfrage antwortet.
+
+Beim Start fragt die Workbench das äußere Terminal, ob es das Protokoll
+unterstützt (`program status probe` in `update.log`). Wenn ja, beantwortet der
+AI-Bereich die Anfrage des Agenten und reicht seine Meldungen an den Host
+weiter. Der Agent erscheint dann mit seinem Zustand in der Liste des Hosts.
+Endet der Agent, wird er neu gestartet, per F8 ersetzt oder die Workbench
+beendet, verschwindet der Eintrag wieder. Weitergereicht wird nur der
+AI-Bereich; auf Terminals ohne Unterstützung ändert sich nichts, und es werden
+keine zusätzlichen Bytes gesendet.
 
 ### Absturzprotokoll
 

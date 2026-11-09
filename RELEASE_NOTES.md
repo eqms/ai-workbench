@@ -1,5 +1,40 @@
 # Release Notes
 
+## Version 1.16.0 (09.11.2026)
+
+The agent in the AI pane now shows up in terminal hosts such as Herdr.
+
+### Added
+
+- **[ADD] Program status relay (OSC 7501) for the AI pane.** Herdr lists
+  coding agents from the status reports they write to their terminal
+  (`ESC ] 7501 ; state=working:app=claude-code ST`). Claude Code sends those
+  reports only after the terminal answers its query `OSC 7501 ; ?`. Inside
+  the workbench the agent talks to the embedded terminal emulator, which
+  neither answered nor passed anything on, so the agent was missing from the
+  host's agent list in every directory.
+  At startup the workbench now asks the outer terminal whether it speaks the
+  protocol (the query is followed by a DA1 request, so terminals without
+  support answer at once instead of running into a timeout; the result is
+  logged as `program status probe` in `update.log`). With support, the AI
+  pane answers the agent's query with the host's own capability reply and
+  forwards every report to the host. The UI thread writes them between two
+  frames, so a sequence never lands inside a frame. Only printable ASCII up
+  to 4 KB is forwarded, so a pane cannot smuggle control sequences to the
+  host. When the agent exits, is restarted or replaced via F8, or the
+  workbench quits, the relay sends `state=clear` so no stale entry remains.
+  LazyGit and the terminal pane are not relayed. On hosts without support
+  nothing changes.
+
+### Fixed
+
+- **[FIX] `--config <file>` no longer overwrites the user's configuration.**
+  Since 1.15.0 the named file is loaded, but every save — confirming the
+  Claude startup dialog, toggling panes, the settings dialog — still went to
+  `~/.config/ai-workbench/config.yaml` and replaced it with the test
+  configuration. Saves now go back to the file given with `--config`, and
+  the wizard shows that path.
+
 ## Version 1.15.0 (25.10.2026)
 
 Audit release: two data-loss/crash fixes from the project health audit, an

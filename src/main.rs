@@ -8,6 +8,7 @@ pub mod crashlog;
 pub mod filter;
 pub mod git;
 pub mod input;
+pub mod program_status;
 pub mod session;
 pub mod setup;
 pub mod syntax_registry;
@@ -788,6 +789,13 @@ async fn async_main(
     // key reporting stays in effect and behavior is unchanged. The result is
     // logged (update.log) because a failed probe silently disables Shift+Enter;
     // `--key-diag` gives an interactive view of the same probe.
+    // Program status (OSC 7501): lets hosts like Herdr list the agent running
+    // in the AI pane. Must run before the kitty probe, because it reads the
+    // reply straight from the tty before crossterm's reader owns stdin.
+    let status_probe = program_status::probe_host(std::time::Duration::from_millis(500));
+    update::log_update(&format!("program status probe: {:?}", status_probe));
+    program_status::set_host_reply(status_probe);
+
     let kitty_probe = crossterm::terminal::supports_keyboard_enhancement();
     update::log_update(&format!("kitty keyboard probe: {:?}", kitty_probe));
     if kitty_probe.unwrap_or(false) {

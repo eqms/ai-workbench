@@ -109,7 +109,7 @@ impl App {
         let rows = 24;
         let cols = 80;
 
-        match PseudoTerminal::new(&claude_cmd, rows, cols, &cwd) {
+        match PseudoTerminal::spawn(&claude_cmd, rows, cols, &cwd, true) {
             Ok(pty) => {
                 self.terminals.insert(PaneId::Claude, pty);
                 self.claude_error = None;
@@ -132,7 +132,7 @@ impl App {
         self.claude_command_used = command.join(" ");
 
         let cwd = self.file_browser.current_dir.clone();
-        match PseudoTerminal::new(&command, 24, 80, &cwd) {
+        match PseudoTerminal::spawn(&command, 24, 80, &cwd, true) {
             Ok(pty) => {
                 self.terminals.insert(PaneId::Claude, pty);
                 self.claude_error = None;
@@ -440,7 +440,9 @@ impl App {
             };
 
             // Start a fresh shell/process
-            if let Ok(new_pty) = PseudoTerminal::new(&cmd, rows, cols, &cwd) {
+            if let Ok(new_pty) =
+                PseudoTerminal::spawn(&cmd, rows, cols, &cwd, pane_id == PaneId::Claude)
+            {
                 self.terminals.insert(pane_id, new_pty);
             }
         }
@@ -496,7 +498,9 @@ impl App {
         };
 
         // Start a fresh shell/process
-        if let Ok(new_pty) = PseudoTerminal::new(&cmd, rows, cols, &cwd) {
+        if let Ok(new_pty) =
+            PseudoTerminal::spawn(&cmd, rows, cols, &cwd, pane_id == PaneId::Claude)
+        {
             self.terminals.insert(pane_id, new_pty);
         }
     }

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::types::{ClaudeEffort, ClaudeModel, ClaudePermissionMode};
 
@@ -1015,13 +1015,26 @@ pub fn load_config() -> Result<Config> {
     load_config_checked().map(|(config, _)| config)
 }
 
+/// The file named by `--config`, once it has loaded. Saves go there, so a run
+/// with an explicit config never overwrites the user's own configuration.
+static EXPLICIT_CONFIG: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
 /// Load an explicitly named config file (`--config <path>`), bypassing the
-/// local-config trust check and the home-directory lookup.
+/// local-config trust check and the home-directory lookup. Later saves of
+/// this run are written back to the same file.
 pub fn load_config_from(path: &Path) -> Result<Config> {
     let contents = fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("cannot read config {}: {}", path.display(), e))?;
-    serde_yaml_ng::from_str(&contents)
-        .map_err(|e| anyhow::anyhow!("{} is not a valid config: {}", path.display(), e))
+    let config = serde_yaml_ng::from_str(&contents)
+        .map_err(|e| anyhow::anyhow!("{} is not a valid config: {}", path.display(), e))?;
+    let _ = EXPLICIT_CONFIG.set(path.to_path_buf());
+    Ok(config)
+}
+
+/// Where `save_config` writes: the `--config` file if one was given,
+/// otherwise `None` (local or XDG config, decided by the caller).
+fn explicit_config_path() -> Option<&'static Path> {
+    EXPLICIT_CONFIG.get().map(PathBuf::as_path)
 }
 
 /// Like [`load_config`], but also reports what happened to `./config.yaml`
@@ -1069,6 +1082,16 @@ fn set_restrictive_permissions(_path: &Path) -> Result<()> {
 
 /// Save config - updates local config.yaml if it is trusted, otherwise XDG config
 pub fn save_config(config: &Config) -> Result<()> {
+    // A run with `--config <file>` saves into that file. Before 1.16.0 it fell
+    // through to the XDG config and silently replaced the user's settings
+    // with the test configuration.
+    if let Some(path) = explicit_config_path() {
+        let yaml = serde_yaml_ng::to_string(config)?;
+        fs::write(path, &yaml)?;
+        set_restrictive_permissions(path)?;
+        return Ok(());
+    }
+
     // Update the repository-local config.yaml only if it is the one we actually
     // loaded. Writing into an unapproved file would both leak the user's
     // settings into an untrusted tree and mislead them about which file is live.
@@ -1097,6 +1120,9 @@ pub fn save_config(config: &Config) -> Result<()> {
 
 /// Get the config file path (for display purposes)
 pub fn get_config_path() -> Option<std::path::PathBuf> {
+    if let Some(path) = explicit_config_path() {
+        return Some(path.to_path_buf());
+    }
     get_config_dir().map(|d| d.join("config.yaml"))
 }
 

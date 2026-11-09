@@ -1,7 +1,7 @@
 use anyhow::Result;
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
@@ -18,12 +18,20 @@ fn lock_or_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// back to the child process running inside the PTY.
 pub struct PtyCallbacks {
     pending_responses: Vec<Vec<u8>>,
+    /// Host capability reply for program status (OSC 7501). `Some` only for
+    /// the AI pane, and only when the host terminal supports the protocol.
+    status_relay: Option<String>,
+    /// Program status reports waiting for the UI thread to write them to
+    /// the host terminal.
+    pending_host_reports: Vec<Vec<u8>>,
 }
 
 impl PtyCallbacks {
-    fn new() -> Self {
+    fn new(status_relay: Option<String>) -> Self {
         Self {
             pending_responses: Vec::new(),
+            status_relay,
+            pending_host_reports: Vec::new(),
         }
     }
 
@@ -33,6 +41,21 @@ impl PtyCallbacks {
 }
 
 impl vt100::Callbacks for PtyCallbacks {
+    fn unhandled_osc(&mut self, _screen: &mut vt100::Screen, params: &[&[u8]]) {
+        let Some(host_reply) = self.status_relay.as_deref() else {
+            return;
+        };
+        match crate::program_status::classify_osc(params) {
+            Some(crate::program_status::OscAction::Query) => self
+                .pending_responses
+                .push(crate::program_status::osc_sequence(host_reply)),
+            Some(crate::program_status::OscAction::Report(payload)) => self
+                .pending_host_reports
+                .push(crate::program_status::osc_sequence(&payload)),
+            None => {}
+        }
+    }
+
     fn unhandled_csi(
         &mut self,
         screen: &mut vt100::Screen,
@@ -174,10 +197,33 @@ pub struct PseudoTerminal {
     /// by `take_output_pending()`. Lets the event loop skip frames in which
     /// no pane changed.
     output_pending: Arc<AtomicBool>,
+    /// Unique per spawned PTY, see `instance_id()`.
+    instance_id: usize,
 }
+
+/// Source for `PseudoTerminal::instance_id`.
+static NEXT_INSTANCE_ID: AtomicUsize = AtomicUsize::new(1);
 
 impl PseudoTerminal {
     pub fn new(command: &[String], rows: u16, cols: u16, cwd: &std::path::Path) -> Result<Self> {
+        Self::spawn(command, rows, cols, cwd, false)
+    }
+
+    /// Spawn a PTY. With `relay_program_status`, program status reports
+    /// (OSC 7501) are answered and queued for the host terminal — meant for
+    /// the AI pane only, and a no-op unless the startup probe found support.
+    pub fn spawn(
+        command: &[String],
+        rows: u16,
+        cols: u16,
+        cwd: &std::path::Path,
+        relay_program_status: bool,
+    ) -> Result<Self> {
+        let status_relay = if relay_program_status {
+            crate::program_status::host_reply().map(str::to_owned)
+        } else {
+            None
+        };
         let pty_system = NativePtySystem::default();
         let pair = pty_system.openpty(PtySize {
             rows,
@@ -190,7 +236,7 @@ impl PseudoTerminal {
             rows,
             cols,
             1000,
-            PtyCallbacks::new(),
+            PtyCallbacks::new(status_relay),
         )));
         let exited = Arc::new(AtomicBool::new(false));
         // Starts set so the first frame after spawning paints the pane.
@@ -273,6 +319,7 @@ impl PseudoTerminal {
             master: pair.master,
             exited,
             output_pending,
+            instance_id: NEXT_INSTANCE_ID.fetch_add(1, Ordering::Relaxed),
         })
     }
 
@@ -281,6 +328,19 @@ impl PseudoTerminal {
     /// drains it each iteration and only redraws when a pane reported output.
     pub fn take_output_pending(&self) -> bool {
         self.output_pending.swap(false, Ordering::AcqRel)
+    }
+
+    /// Identifies this PTY instance; never reused within the process. Lets
+    /// the app notice that a pane's process was replaced.
+    pub fn instance_id(&self) -> usize {
+        self.instance_id
+    }
+
+    /// Program status reports (complete OSC 7501 sequences) queued since the
+    /// last call. Always empty for panes spawned without the relay.
+    pub fn take_host_reports(&self) -> Vec<Vec<u8>> {
+        let mut parser = lock_or_recover(&self.parser);
+        std::mem::take(&mut parser.callbacks_mut().pending_host_reports)
     }
 
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
@@ -664,6 +724,44 @@ pub(crate) fn strip_control_chars(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    fn relay_parser(host: Option<&str>) -> vt100::Parser<super::PtyCallbacks> {
+        vt100::Parser::new_with_callbacks(
+            24,
+            80,
+            0,
+            super::PtyCallbacks::new(host.map(str::to_owned)),
+        )
+    }
+
+    #[test]
+    fn program_status_query_is_answered_with_the_host_reply() {
+        let mut parser = relay_parser(Some("?:states=idle"));
+        parser.process(b"\x1b]7501;?\x1b\\");
+        assert_eq!(
+            parser.callbacks_mut().drain_responses(),
+            vec![b"\x1b]7501;?:states=idle\x1b\\".to_vec()]
+        );
+    }
+
+    #[test]
+    fn program_status_reports_are_queued_for_the_host() {
+        let mut parser = relay_parser(Some("?:states=idle"));
+        parser.process(b"\x1b]7501;state=working:app=claude-code\x07text");
+        assert_eq!(
+            std::mem::take(&mut parser.callbacks_mut().pending_host_reports),
+            vec![b"\x1b]7501;state=working:app=claude-code\x1b\\".to_vec()]
+        );
+        assert!(parser.callbacks_mut().drain_responses().is_empty());
+    }
+
+    #[test]
+    fn without_relay_program_status_is_ignored() {
+        let mut parser = relay_parser(None);
+        parser.process(b"\x1b]7501;?\x1b\\\x1b]7501;state=idle\x1b\\");
+        assert!(parser.callbacks_mut().drain_responses().is_empty());
+        assert!(parser.callbacks_mut().pending_host_reports.is_empty());
+    }
+
     #[test]
     fn paste_markers_inside_the_payload_are_removed() {
         // Otherwise the embedded end marker closes the block and the rest of

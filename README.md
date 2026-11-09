@@ -99,6 +99,7 @@ ai-workbench ollama-pi         # Pi via Ollama launch
 - **App Dropdown** - auto-detect installed browsers/editors in Settings (macOS + Linux)
 - **Ctrl+X Markdown Export** - export as Markdown copy or PDF (native Typst engine, no external tools needed)
 - **Settings text fields support cursor navigation** — `←/→`, `Home`/`End`, `Delete`, `Backspace`, and `Ctrl+V` / `Cmd+V` paste in Shift+F8 input fields
+- **Agent status for terminal hosts** - Herdr and other hosts that speak the program status protocol (OSC 7501) list the agent in the AI pane, with its working / blocked / idle state
 - Mouse and keyboard navigation throughout
 
 ### Quick Start
@@ -301,6 +302,7 @@ ai-workbench ollama-pi         # Pi via Ollama launch
 - **App-Dropdown** - automatische Erkennung installierter Browser/Editoren in Settings (macOS + Linux)
 - **Ctrl+X Markdown-Export** - Export als Markdown-Kopie oder PDF (native Typst-Engine, keine externen Tools nötig)
 - **Einstellungs-Textfelder mit Cursor-Navigation** — `←/→`, `Home`/`End`, `Delete`, `Backspace` und `Ctrl+V` / `Cmd+V` Einfügen in Shift+F8-Eingabefeldern
+- **Agent-Status für Terminal-Hosts** - Herdr und andere Hosts, die das Program-Status-Protokoll (OSC 7501) sprechen, führen den Agenten im AI-Bereich in ihrer Agent-Liste, mit Zustand Arbeitet / Blockiert / Leerlauf
 - Maus- und Tastaturnavigation durchgehend
 
 ### Schnellstart
