@@ -244,12 +244,24 @@ fn help_content() -> Vec<Line<'static>> {
             Span::raw("Navigate files"),
         ]),
         Line::from(vec![
-            Span::styled("  Enter/→/l    ", Style::default().fg(Color::Cyan)),
-            Span::raw("Expand/Collapse dir, Open file"),
+            Span::styled("  PgUp/PgDn    ", Style::default().fg(Color::Cyan)),
+            Span::raw("Move one page"),
         ]),
         Line::from(vec![
-            Span::styled("  Double-Click ", Style::default().fg(Color::Cyan)),
-            Span::raw("Expand/Collapse dir, Open file"),
+            Span::styled("  Home/End g/G ", Style::default().fg(Color::Cyan)),
+            Span::raw("First / last entry"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Enter/→/l    ", Style::default().fg(Color::Cyan)),
+            Span::raw("Expand/Collapse dir, focus preview on file"),
+        ]),
+        Line::from(vec![
+            Span::styled("  L / H        ", Style::default().fg(Color::Cyan)),
+            Span::raw("Selected dir becomes tree root / root up"),
+        ]),
+        Line::from(vec![
+            Span::styled("  Click ▶/▼    ", Style::default().fg(Color::Cyan)),
+            Span::raw("Expand/Collapse dir (also double-click)"),
         ]),
         Line::from(vec![
             Span::styled("  Back/←/h     ", Style::default().fg(Color::Cyan)),

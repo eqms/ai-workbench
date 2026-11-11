@@ -522,6 +522,9 @@ impl App {
         // draining before the first frame is ever visible.
         self.intro.restart();
 
+        // Opt-in remote check for the launch directory (`git.check_on_startup`).
+        self.start_startup_remote_check();
+
         // Redraw policy. The loop still polls input every 16 ms, but a frame is
         // only painted when something can have changed: an input event, PTY
         // output, the file-browser refresh, or — as a catch-all for

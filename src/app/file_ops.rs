@@ -174,7 +174,7 @@ impl App {
     /// whether the user may ask for it. `git pull` fetches on its own, so no
     /// separate remote check is needed.
     fn request_manual_pull(&mut self) {
-        let Some(repo_root) = crate::git::find_repo_root(&self.file_browser.current_dir) else {
+        let Some(repo_root) = crate::git::find_repo_root(&self.file_browser.selection_dir()) else {
             self.copy_flash_message = Some("⚠ Not a git repository".to_string());
             self.copy_flash_lines = 0;
             self.last_copy_time = Some(std::time::Instant::now());
@@ -223,7 +223,7 @@ impl App {
             DialogAction::NewFile => {
                 if let Some(name) = value {
                     if !name.is_empty() && Self::is_safe_filename(&name) {
-                        let new_path = self.file_browser.current_dir.join(&name);
+                        let new_path = self.file_browser.selection_dir().join(&name);
                         // `create_new`: never truncate an existing file of that name.
                         if let Err(e) = std::fs::OpenOptions::new()
                             .write(true)
@@ -239,7 +239,7 @@ impl App {
             DialogAction::NewDirectory => {
                 if let Some(name) = value {
                     if !name.is_empty() && Self::is_safe_filename(&name) {
-                        let new_path = self.file_browser.current_dir.join(&name);
+                        let new_path = self.file_browser.selection_dir().join(&name);
                         if let Err(e) = std::fs::create_dir(&new_path) {
                             crate::update::log_update(&format!(
                                 "[file_ops] Failed to create directory: {}",

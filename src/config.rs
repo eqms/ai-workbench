@@ -47,6 +47,16 @@ pub struct GitConfig {
     /// this setting, and the LazyGit pane (F5) is untouched either way.
     #[serde(default)]
     pub auto_fetch: bool,
+    /// Run one `git fetch` for the directory the workbench was started in and
+    /// offer a pull when its branch is behind.
+    ///
+    /// Off by default for the same reason as `auto_fetch`: the fetch runs that
+    /// repository's own configuration. The difference is scope — this covers
+    /// only the launch directory, once per start, and never follows the file
+    /// browser. Starting the workbench somewhere is a deliberate act; browsing
+    /// into a directory is not. Settings → General has the switch.
+    #[serde(default)]
+    pub check_on_startup: bool,
 }
 
 /// PTY configuration for all terminal panes
@@ -393,6 +403,14 @@ pub struct FileBrowserConfig {
     pub show_file_info: bool,
     pub date_format: String,
     pub auto_refresh_ms: u64, // 0 = disabled
+    /// Longest gap between two clicks on the same entry that still counts as
+    /// a double-click.
+    #[serde(default = "default_double_click_ms")]
+    pub double_click_ms: u64,
+}
+
+fn default_double_click_ms() -> u64 {
+    300
 }
 
 impl Default for FileBrowserConfig {
@@ -402,6 +420,7 @@ impl Default for FileBrowserConfig {
             show_file_info: true,
             date_format: "%d.%m.%Y %H:%M:%S".to_string(),
             auto_refresh_ms: 2000, // 2 seconds
+            double_click_ms: default_double_click_ms(),
         }
     }
 }
@@ -1224,6 +1243,23 @@ mod tests {
             "auto_fetch must default to off"
         );
         assert!(!GitConfig::default().auto_fetch);
+    }
+
+    #[test]
+    fn git_check_on_startup_defaults_to_off() {
+        // Same reasoning as auto_fetch: a fetch runs the repository's config.
+        assert!(!Config::default().git.check_on_startup);
+        let yaml = "git:\n  auto_fetch: false\n";
+        let git: GitConfig = serde_yaml_ng::from_str(yaml).expect("pre-1.17 git section");
+        assert!(!git.check_on_startup);
+    }
+
+    #[test]
+    fn file_browser_section_without_double_click_still_parses() {
+        let yaml = "show_hidden: true\nshow_file_info: true\ndate_format: \"%d.%m.%Y\"\nauto_refresh_ms: 2000\n";
+        let fb: FileBrowserConfig =
+            serde_yaml_ng::from_str(yaml).expect("pre-1.17 file_browser section");
+        assert_eq!(fb.double_click_ms, 300);
     }
 
     #[test]

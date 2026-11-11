@@ -178,6 +178,10 @@ git:
   # (`remote.<n>.url = ext::…`, `core.sshCommand`, `credential.helper`),
   # so auto-fetch would let any browsed directory run code.
   auto_fetch: false
+  # One fetch for the launch directory at startup, pull offered when behind.
+  # Also off by default (same reason), but scoped to the directory the user
+  # chose to start in; it has a switch in Settings → General.
+  check_on_startup: false
 ```
 
 Session persistence (`src/session.rs`) is global, not per project: it stores

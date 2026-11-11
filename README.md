@@ -170,6 +170,11 @@ file_browser:
   show_file_info: true
   date_format: "%d.%m.%Y %H:%M:%S"
   auto_refresh_ms: 2000
+  double_click_ms: 300    # double-click window in the file browser
+
+git:
+  check_on_startup: false # fetch the launch directory once and offer a pull when behind
+  auto_fetch: false       # fetch every repository the file browser enters (only for trees you control)
 
 # Optional: Claude startup prefixes and remote control
 claude:
@@ -373,6 +378,11 @@ file_browser:
   show_file_info: true
   date_format: "%d.%m.%Y %H:%M:%S"
   auto_refresh_ms: 2000
+  double_click_ms: 300    # double-click window in the file browser
+
+git:
+  check_on_startup: false # fetch the launch directory once and offer a pull when behind
+  auto_fetch: false       # fetch every repository the file browser enters (only for trees you control)
 
 # Optional: Claude Startup-Präfixe und Remote Control
 claude:

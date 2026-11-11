@@ -1,4 +1,5 @@
-//! File-browser pane key handling — j/k navigation, h/l directory entry,
+//! File-browser pane key handling — j/k navigation, PageUp/PageDown and
+//! Home/End (`g`/`G`) jumps, h/l directory entry, `H`/`L` re-rooting the tree,
 //! `o`/`O` external open, `.` toggle hidden, `i` add-to-gitignore,
 //! Ctrl+A toggle autosave, `q` quit.
 
@@ -17,9 +18,45 @@ impl App {
                 self.file_browser.up();
                 self.update_preview();
             }
+            KeyCode::PageUp => {
+                self.file_browser
+                    .page_up(self.files_pane_height.max(1) as usize);
+                self.update_preview();
+            }
+            KeyCode::PageDown => {
+                self.file_browser
+                    .page_down(self.files_pane_height.max(1) as usize);
+                self.update_preview();
+            }
+            KeyCode::Home | KeyCode::Char('g') => {
+                self.file_browser.select_first();
+                self.update_preview();
+            }
+            KeyCode::End | KeyCode::Char('G') => {
+                self.file_browser.select_last();
+                self.update_preview();
+            }
+            // Make the selected directory the tree root / move the root up.
+            KeyCode::Char('L') => {
+                if self.file_browser.root_into_selected() {
+                    self.update_preview();
+                    self.sync_terminals();
+                    self.check_repo_change();
+                }
+            }
+            KeyCode::Char('H') => {
+                self.file_browser.root_up();
+                self.update_preview();
+                self.sync_terminals();
+                self.check_repo_change();
+            }
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
                 if let Some(_path) = self.file_browser.enter_selected() {
-                    // File opened
+                    // A file is already shown in the preview; hand it the focus
+                    // so Enter leads somewhere instead of doing nothing.
+                    if self.show_preview {
+                        self.active_pane = crate::types::PaneId::Preview;
+                    }
                 } else {
                     self.update_preview();
                     self.sync_terminals();
@@ -38,7 +75,7 @@ impl App {
                 }
             }
             KeyCode::Char('O') => {
-                let dir = self.file_browser.current_dir.clone();
+                let dir = self.file_browser.selection_dir();
                 let outcome = crate::browser::remote_open::open_or_transfer(
                     &dir,
                     crate::browser::remote_open::OpenKind::Directory,

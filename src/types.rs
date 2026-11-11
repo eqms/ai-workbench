@@ -1040,6 +1040,10 @@ pub struct GitRemoteState {
     pub last_repo_root: Option<std::path::PathBuf>,
     /// Whether a check is currently in progress
     pub checking: bool,
+    /// Repository the running check belongs to. Kept apart from
+    /// `last_repo_root`, which moves on when the user navigates while the
+    /// fetch is still in flight.
+    pub checking_repo_root: Option<std::path::PathBuf>,
 }
 
 /// State for the Markdown export format chooser (Ctrl+X)

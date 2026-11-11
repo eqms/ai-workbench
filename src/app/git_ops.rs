@@ -21,20 +21,60 @@ impl App {
         // config (`remote.<n>.url = ext::…`, `core.sshCommand`, …), so firing it
         // on mere navigation would let any browsed directory run code. Local
         // status colors below do not need the network and stay unconditional.
-        if repo_changed && self.config.git.auto_fetch && !self.git_remote.checking {
+        if repo_changed && self.config.git.auto_fetch {
             if let Some(repo_root) = &current_repo {
-                // Get current branch
-                if let Some(branch) = git::get_current_branch(repo_root) {
-                    // Start async check
-                    self.git_remote.checking = true;
-                    self.git_check_job =
-                        JobState::running(git::check_remote_changes_async(repo_root, &branch));
-                }
+                self.start_remote_check(repo_root);
             }
         }
 
         // Update last repo
         self.git_remote.last_repo_root = current_repo;
+    }
+
+    /// Fetch `repo_root` in the background and compare it with its upstream.
+    /// The result is picked up by [`Self::poll_git_check`].
+    fn start_remote_check(&mut self, repo_root: &std::path::Path) {
+        if self.git_remote.checking {
+            return;
+        }
+        if let Some(branch) = git::get_current_branch(repo_root) {
+            self.git_remote.checking = true;
+            self.git_remote.checking_repo_root = Some(repo_root.to_path_buf());
+            self.git_check_job =
+                JobState::running(git::check_remote_changes_async(repo_root, &branch));
+        }
+    }
+
+    /// Check the launch directory's repository once, right at startup.
+    ///
+    /// Opt-in via `git.check_on_startup`. Unlike `git.auto_fetch` this never
+    /// follows navigation: only the directory the workbench was started in is
+    /// fetched, exactly once. Marking the repository as seen keeps `auto_fetch`
+    /// from fetching it a second time on the first navigation.
+    pub(super) fn start_startup_remote_check(&mut self) {
+        if !self.config.git.check_on_startup {
+            return;
+        }
+        let Some(repo_root) = git::find_repo_root(&self.file_browser.root_dir) else {
+            return;
+        };
+        self.start_remote_check(&repo_root);
+        self.git_remote.last_repo_root = Some(repo_root);
+    }
+
+    /// Whether an overlay is up that the pull dialog must not interrupt. The
+    /// confirm dialog takes keyboard priority over the startup overlays but is
+    /// drawn beneath them, so showing it early would swallow keys invisibly.
+    fn pull_dialog_must_wait(&self) -> bool {
+        self.intro.visible
+            || self.agent_startup.visible
+            || self.claude_startup.visible
+            || self.permission_mode_dialog.visible
+            || self.backend_switch.visible
+            || self.wizard.visible
+            || self.settings.visible
+            || self.update_state.show_dialog
+            || self.dialog.is_active()
     }
 
     /// Add selected file/folder to .gitignore and open it in editor
@@ -46,7 +86,12 @@ impl App {
         let gitignore_path = if let Some(repo_root) = &self.file_browser.repo_root {
             repo_root.join(".gitignore")
         } else {
-            self.file_browser.current_dir.join(".gitignore")
+            // Outside a repository the entry belongs next to the ignored path,
+            // not into wherever a directory was last expanded.
+            path.parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| self.file_browser.current_dir.clone())
+                .join(".gitignore")
         };
 
         // 2. Compute relative path from repo root (or just filename)
@@ -111,6 +156,10 @@ impl App {
 
     /// Poll for git remote check results and show dialog if needed
     pub(super) fn poll_git_check(&mut self) {
+        // Leave a finished result in the channel until the screen is free.
+        if self.git_remote.checking && self.pull_dialog_must_wait() {
+            return;
+        }
         let result = match self.git_check_job.poll() {
             PollOutcome::Ready(result) => result,
             // Disconnected: worker thread panicked or returned early; silently
@@ -129,8 +178,9 @@ impl App {
                 commits_ahead,
                 branch,
             } => {
-                // Show pull confirmation dialog
-                if let Some(repo_root) = self.git_remote.last_repo_root.clone() {
+                // Show pull confirmation dialog — for the repository that was
+                // checked, which need not be the one the browser is in by now.
+                if let Some(repo_root) = self.git_remote.checking_repo_root.take() {
                     use ui::dialog::{DialogAction, DialogType};
                     self.dialog.dialog_type = DialogType::Confirm {
                         title: "Git Pull".to_string(),

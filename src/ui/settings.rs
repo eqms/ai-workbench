@@ -211,6 +211,7 @@ pub struct SettingsState {
     pub auto_refresh_ms: u64,
     pub choose_backend_at_startup: bool,
     pub show_claude_start_dialog: bool,
+    pub git_check_on_startup: bool,
     pub file_browser_width: u16,
     pub preview_width: u16,
     pub right_panel_width: u16,
@@ -287,6 +288,7 @@ impl Default for SettingsState {
             auto_refresh_ms: 2000,
             choose_backend_at_startup: true,
             show_claude_start_dialog: true,
+            git_check_on_startup: false,
             file_browser_width: 20,
             preview_width: 50,
             right_panel_width: 30,
@@ -352,6 +354,7 @@ impl SettingsState {
         self.auto_refresh_ms = config.file_browser.auto_refresh_ms;
         self.choose_backend_at_startup = config.ui.choose_backend_at_startup;
         self.show_claude_start_dialog = config.claude.show_permission_dialog;
+        self.git_check_on_startup = config.git.check_on_startup;
         self.file_browser_width = config.layout.file_browser_width_percent;
         self.preview_width = config.layout.preview_width_percent;
         self.right_panel_width = config.layout.right_panel_width_percent;
@@ -418,6 +421,7 @@ impl SettingsState {
         config.file_browser.auto_refresh_ms = self.auto_refresh_ms;
         config.ui.choose_backend_at_startup = self.choose_backend_at_startup;
         config.claude.show_permission_dialog = self.show_claude_start_dialog;
+        config.git.check_on_startup = self.git_check_on_startup;
         config.layout.file_browser_width_percent = self.file_browser_width;
         config.layout.preview_width_percent = self.preview_width;
         config.layout.right_panel_width_percent = self.right_panel_width;
@@ -504,9 +508,11 @@ impl SettingsState {
 
     pub fn item_count(&self) -> usize {
         match self.category {
-            SettingsCategory::General => 8, // shell, scrollback, hidden, autosave, auto-refresh, AI launcher, Claude dialog, check updates
-            SettingsCategory::Layout => 4,  // file_browser, preview, right_panel, claude_height
-            SettingsCategory::Paths => 11,  // AI commands, lazygit, browser, editor, export
+            // shell, scrollback, hidden, autosave, auto-refresh, AI launcher,
+            // Claude dialog, git check at startup, check updates
+            SettingsCategory::General => 9,
+            SettingsCategory::Layout => 4, // file_browser, preview, right_panel, claude_height
+            SettingsCategory::Paths => 11, // AI commands, lazygit, browser, editor, export
             SettingsCategory::Document => 23,
             SettingsCategory::Ssh => 3, // enabled, helper path, reset hint
             SettingsCategory::About => 0,
@@ -515,7 +521,7 @@ impl SettingsState {
 
     /// Check if the currently selected item is the "Check for Updates" action
     pub fn is_check_updates_selected(&self) -> bool {
-        self.category == SettingsCategory::General && self.selected_idx == 7
+        self.category == SettingsCategory::General && self.selected_idx == 8
     }
 
     pub fn move_up(&mut self) {
@@ -820,6 +826,10 @@ impl SettingsState {
                 }
                 6 => {
                     self.show_claude_start_dialog = !self.show_claude_start_dialog;
+                    self.has_changes = true;
+                }
+                7 => {
+                    self.git_check_on_startup = !self.git_check_on_startup;
                     self.has_changes = true;
                 }
                 _ => self.start_editing(),
@@ -1214,7 +1224,12 @@ fn render_general(frame: &mut Frame, area: Rect, state: &SettingsState) {
             state.show_claude_start_dialog,
             state.selected_idx == 6,
         ),
-        format_action_setting("Check for Updates", state.selected_idx == 7),
+        format_bool_setting(
+            "Check Git Remote at Startup",
+            state.git_check_on_startup,
+            state.selected_idx == 7,
+        ),
+        format_action_setting("Check for Updates", state.selected_idx == 8),
     ];
 
     let list = create_settings_list(items);
@@ -1841,7 +1856,7 @@ mod tests {
     #[test]
     fn test_paths_item_count() {
         let mut state = SettingsState::default();
-        assert_eq!(state.item_count(), 8); // General is default
+        assert_eq!(state.item_count(), 9); // General is default
         state.category = SettingsCategory::Paths;
         // Paths: claude, lazygit, opencode, pi, codex, antigravity, ollama-opencode,
         // ollama-pi, browser, external_editor, export_dir
@@ -1942,8 +1957,29 @@ mod tests {
         state.apply_to_config(&mut config);
         assert!(config.ui.choose_backend_at_startup);
 
-        state.selected_idx = 7;
+        state.selected_idx = 8;
         assert!(state.is_check_updates_selected());
+    }
+
+    /// The startup remote check is opt-in and must be reachable from the UI —
+    /// `git.auto_fetch` deliberately has no switch, this one does.
+    #[test]
+    fn test_git_startup_check_toggle_round_trips_through_config() {
+        let mut config = Config::default();
+        assert!(!config.git.check_on_startup);
+
+        let mut state = SettingsState::default();
+        state.load_from_config(&config);
+        state.category = SettingsCategory::General;
+        state.selected_idx = 7;
+        assert!(!state.is_check_updates_selected());
+        state.toggle_or_select();
+        assert!(state.git_check_on_startup);
+        assert!(state.has_changes);
+
+        state.apply_to_config(&mut config);
+        assert!(config.git.check_on_startup);
+        assert!(!config.git.auto_fetch, "navigation fetch stays off");
     }
 
     /// Off = Claude starts straight away with the values last confirmed in its

@@ -250,6 +250,82 @@ impl FileBrowserState {
         self.list_state.select(Some(i));
     }
 
+    /// Move the selection up by `page` rows, stopping at the first entry.
+    pub fn page_up(&mut self, page: usize) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let i = self.list_state.selected().unwrap_or(0);
+        self.list_state.select(Some(i.saturating_sub(page.max(1))));
+    }
+
+    /// Move the selection down by `page` rows, stopping at the last entry.
+    pub fn page_down(&mut self, page: usize) {
+        if self.entries.is_empty() {
+            return;
+        }
+        let last = self.entries.len() - 1;
+        let i = self.list_state.selected().unwrap_or(0);
+        self.list_state
+            .select(Some(i.saturating_add(page.max(1)).min(last)));
+    }
+
+    /// Select the first entry.
+    pub fn select_first(&mut self) {
+        if !self.entries.is_empty() {
+            self.list_state.select(Some(0));
+        }
+    }
+
+    /// Select the last entry.
+    pub fn select_last(&mut self) {
+        if !self.entries.is_empty() {
+            self.list_state.select(Some(self.entries.len() - 1));
+        }
+    }
+
+    /// The directory the *selection* refers to: the selected directory itself,
+    /// the parent of a selected file, or the tree root for the ".." entry.
+    ///
+    /// `current_dir` only changes when a directory is expanded or collapsed, so
+    /// it lags behind the highlight. Actions that act on "where the cursor is"
+    /// (new file, open folder, pull) use this instead.
+    pub fn selection_dir(&self) -> PathBuf {
+        match self.selected_entry() {
+            Some(entry) if entry.name == ".." => self.root_dir.clone(),
+            Some(entry) if entry.is_dir => entry.path.clone(),
+            Some(entry) => entry
+                .path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|| self.root_dir.clone()),
+            None => self.current_dir.clone(),
+        }
+    }
+
+    /// Make the selected directory (or the selected file's directory) the new
+    /// tree root. Returns `false` when that is already the root.
+    pub fn root_into_selected(&mut self) -> bool {
+        let target = self.selection_dir();
+        if target == self.root_dir || !target.is_dir() {
+            return false;
+        }
+        self.root_dir = target.clone();
+        self.current_dir = target.clone();
+        self.expanded_dirs.insert(target);
+        self.load_tree();
+        // Land on the first real entry rather than on "..".
+        if self.entries.len() > 1 && self.entries[0].name == ".." {
+            self.list_state.select(Some(1));
+        }
+        true
+    }
+
+    /// Move the tree root up one level, keeping the old root selected.
+    pub fn root_up(&mut self) {
+        self.navigate_root_up();
+    }
+
     /// Toggle expand/collapse for directories, return file path for files
     pub fn enter_selected(&mut self) -> Option<PathBuf> {
         if let Some(i) = self.list_state.selected() {
@@ -261,9 +337,15 @@ impl FileBrowserState {
                 }
 
                 if entry.is_dir {
+                    let was_expanded = self.expanded_dirs.contains(&entry.path);
                     self.toggle_expand(&entry.path);
-                    // Update current_dir to the selected directory
-                    self.current_dir = entry.path;
+                    // Expanding enters the directory; collapsing leaves it, so
+                    // the terminals are not sent into a folder just closed.
+                    self.current_dir = if was_expanded {
+                        self.parent_within_root(&entry.path)
+                    } else {
+                        entry.path
+                    };
                     return None;
                 } else {
                     return Some(entry.path);
@@ -271,6 +353,14 @@ impl FileBrowserState {
             }
         }
         None
+    }
+
+    /// Parent of `path`, never above the tree root.
+    fn parent_within_root(&self, path: &std::path::Path) -> PathBuf {
+        match path.parent() {
+            Some(parent) if parent.starts_with(&self.root_dir) => parent.to_path_buf(),
+            _ => self.root_dir.clone(),
+        }
     }
 
     /// Toggle a directory's expanded state and rebuild the tree
@@ -309,6 +399,7 @@ impl FileBrowserState {
         if entry.is_dir && self.expanded_dirs.contains(&entry.path) {
             self.expanded_dirs.remove(&entry.path);
             self.rebuild_tree();
+            self.current_dir = self.parent_within_root(&entry.path);
             return;
         }
 
@@ -345,11 +436,19 @@ impl FileBrowserState {
             let old_root = self.root_dir.clone();
             self.root_dir = parent.to_path_buf();
             self.current_dir = self.root_dir.clone();
-            self.expanded_dirs.clear();
+            // Keep every expanded directory: going up one level must not
+            // collapse the tree the user had open below the old root.
             self.expanded_dirs.insert(self.root_dir.clone());
-            // Keep old root expanded so we can see where we came from
-            self.expanded_dirs.insert(old_root);
+            self.expanded_dirs.insert(old_root.clone());
             self.load_tree();
+            // Stay on the directory we came from instead of jumping to "..".
+            if let Some(idx) = self
+                .entries
+                .iter()
+                .position(|e| e.path == old_root && e.name != "..")
+            {
+                self.list_state.select(Some(idx));
+            }
         }
     }
 
@@ -454,6 +553,20 @@ impl FileBrowserState {
         self.expanded_dirs.insert(self.root_dir.clone());
         self.load_tree();
     }
+}
+
+/// Width of the tree marker a click may hit to expand or collapse a directory:
+/// the arrow, the space after it and the two-cell folder icon.
+const TREE_MARKER_WIDTH: usize = 4;
+
+/// Whether a click at column `rel_x` (0 = first cell inside the left border)
+/// hits the expand/collapse marker of an entry at tree depth `depth`.
+///
+/// Mirrors the row layout in [`render`]: status symbol, one space, four cells
+/// of indentation per level, then the marker.
+pub fn hits_tree_marker(depth: usize, rel_x: usize) -> bool {
+    let start = 2 + depth * 4;
+    (start..start + TREE_MARKER_WIDTH).contains(&rel_x)
 }
 
 /// Get style for git status
@@ -629,6 +742,159 @@ mod tests {
         s.expanded_dirs.insert(dir.to_path_buf());
         s.load_tree();
         s
+    }
+
+    fn browser_at(dir: &std::path::Path) -> FileBrowserState {
+        browser_with_files(dir, 0)
+    }
+
+    fn select_path(state: &mut FileBrowserState, path: &std::path::Path) {
+        let idx = state
+            .entries
+            .iter()
+            .position(|e| e.path == path && e.name != "..")
+            .expect("entry present");
+        state.list_state.select(Some(idx));
+    }
+
+    #[test]
+    fn page_and_jump_keys_clamp_to_the_list() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut state = browser_with_files(tmp.path(), 30);
+        let last = state.entries.len() - 1;
+
+        state.select_last();
+        assert_eq!(state.list_state.selected(), Some(last));
+        state.page_down(10);
+        assert_eq!(state.list_state.selected(), Some(last), "no overshoot");
+
+        state.select_first();
+        assert_eq!(state.list_state.selected(), Some(0));
+        state.page_up(10);
+        assert_eq!(state.list_state.selected(), Some(0), "no underflow");
+
+        state.page_down(10);
+        assert_eq!(state.list_state.selected(), Some(10));
+        state.page_up(4);
+        assert_eq!(state.list_state.selected(), Some(6));
+        // A pane that has not been drawn yet reports height 0.
+        state.page_down(0);
+        assert_eq!(state.list_state.selected(), Some(7));
+    }
+
+    #[test]
+    fn collapsing_a_directory_leaves_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let sub = root.join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("a.txt"), "x").unwrap();
+        let mut state = browser_at(&root);
+
+        select_path(&mut state, &sub);
+        assert!(state.enter_selected().is_none());
+        assert_eq!(state.current_dir, sub, "expanding enters the directory");
+
+        assert!(state.enter_selected().is_none());
+        assert_eq!(state.current_dir, root, "collapsing returns to the parent");
+
+        // Same via the "left" key on an expanded directory.
+        state.enter_selected();
+        assert_eq!(state.current_dir, sub);
+        state.go_parent();
+        assert_eq!(state.current_dir, root);
+    }
+
+    #[test]
+    fn root_up_keeps_expansion_and_selects_old_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let root = base.join("project");
+        let sub = root.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("a.txt"), "x").unwrap();
+        std::fs::write(root.join("top.txt"), "x").unwrap();
+        let mut state = browser_at(&root);
+        select_path(&mut state, &sub);
+        state.enter_selected(); // expand sub
+
+        // "left" on a top-level file moves the whole view up one level.
+        select_path(&mut state, &root.join("top.txt"));
+        state.go_parent();
+
+        assert_eq!(state.root_dir, base);
+        assert_eq!(
+            state.selected_entry().map(|e| e.path.clone()),
+            Some(root.clone()),
+            "selection stays on the directory we came from"
+        );
+        assert!(
+            state.entries.iter().any(|e| e.path == sub.join("a.txt")),
+            "previously expanded directories stay open"
+        );
+    }
+
+    #[test]
+    fn selection_dir_follows_the_highlight() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let sub = root.join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("a.txt"), "x").unwrap();
+        std::fs::write(root.join("top.txt"), "x").unwrap();
+        let mut state = browser_at(&root);
+
+        select_path(&mut state, &sub);
+        assert_eq!(state.selection_dir(), sub, "collapsed directory counts");
+        state.enter_selected();
+        select_path(&mut state, &sub.join("a.txt"));
+        assert_eq!(state.selection_dir(), sub, "file -> its directory");
+        select_path(&mut state, &root.join("top.txt"));
+        assert_eq!(state.selection_dir(), root);
+        state.select_first(); // ".."
+        assert_eq!(state.selection_dir(), root);
+    }
+
+    #[test]
+    fn root_into_selected_makes_the_directory_the_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        let sub = root.join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::write(sub.join("a.txt"), "x").unwrap();
+        std::fs::write(root.join("top.txt"), "x").unwrap();
+        let mut state = browser_at(&root);
+
+        select_path(&mut state, &root.join("top.txt"));
+        assert!(!state.root_into_selected(), "already the root");
+        assert_eq!(state.root_dir, root);
+
+        select_path(&mut state, &sub);
+        assert!(state.root_into_selected());
+        assert_eq!(state.root_dir, sub);
+        assert_eq!(state.current_dir, sub);
+        assert_eq!(
+            state.selected_entry().map(|e| e.name.clone()),
+            Some("a.txt".to_string()),
+            "lands on the first real entry, not on \"..\""
+        );
+
+        state.root_up();
+        assert_eq!(state.root_dir, root);
+        assert_eq!(state.selected_entry().map(|e| e.path.clone()), Some(sub));
+    }
+
+    #[test]
+    fn tree_marker_hit_test_matches_the_row_layout() {
+        // depth 0: status(1) + space(1), marker occupies cells 2..=5
+        assert!(!hits_tree_marker(0, 1));
+        assert!(hits_tree_marker(0, 2));
+        assert!(hits_tree_marker(0, 5));
+        assert!(!hits_tree_marker(0, 6));
+        // depth 2: shifted by eight cells
+        assert!(!hits_tree_marker(2, 9));
+        assert!(hits_tree_marker(2, 10));
+        assert!(!hits_tree_marker(2, 14));
     }
 
     #[test]

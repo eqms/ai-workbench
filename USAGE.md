@@ -64,12 +64,28 @@ Drag pane borders to resize interactively. Changes are saved automatically.
 | Key | Action |
 |-----|--------|
 | j/k, Up/Down | Navigate |
-| Enter | Open/Enter |
-| Backspace/Left | Parent directory |
+| PageUp/PageDown | Move one page |
+| Home/End, g/G | First / last entry |
+| Enter, Right, l | Directory: expand/collapse. File: focus the preview |
+| Backspace, Left, h | Collapse directory, or jump to the parent |
+| L | Make the selected directory the tree root |
+| H | Move the tree root up one level |
+| Click on ▶/▼ or folder icon | Expand/collapse directory |
+| Double-click | Expand/collapse directory (`file_browser.double_click_ms`, default 300) |
 | . | Toggle hidden files |
 | o | Open in browser |
-| O | Open in Finder |
-| g | Go to path |
+| O | Open the selected directory in Finder |
+| F9 → g | Go to path |
+
+New files and directories (F9 → n / N) are created in the selected directory,
+or next to the selected file.
+
+#### Remote check at startup
+With **Settings (F8) → General → Check Git Remote at Startup** switched on
+(`git.check_on_startup: true`), the workbench fetches the repository it was
+started in once per start and offers a pull when the branch is behind. It is
+off by default because a fetch runs that repository's own git configuration.
+Browsing into other repositories never fetches unless `git.auto_fetch` is set.
 
 #### Preview Pane (Read-Only)
 | Key | Action |
@@ -528,12 +544,29 @@ Ziehen Sie Bereichsgrenzen zum interaktiven Ändern der Größe. Änderungen wer
 | Taste | Aktion |
 |-------|--------|
 | j/k, Up/Down | Navigieren |
-| Enter | Öffnen/Betreten |
-| Backspace/Left | Übergeordnetes Verzeichnis |
+| Bild↑/Bild↓ | Eine Seite weiter |
+| Pos1/Ende, g/G | Erster / letzter Eintrag |
+| Enter, Rechts, l | Ordner: auf-/zuklappen. Datei: Fokus in die Vorschau |
+| Backspace, Links, h | Ordner zuklappen oder zum übergeordneten Ordner springen |
+| L | Markierten Ordner zur Wurzel des Baums machen |
+| H | Wurzel des Baums eine Ebene nach oben |
+| Klick auf ▶/▼ oder Ordnersymbol | Ordner auf-/zuklappen |
+| Doppelklick | Ordner auf-/zuklappen (`file_browser.double_click_ms`, Standard 300) |
 | . | Versteckte Dateien umschalten |
 | o | Im Browser öffnen |
-| O | Im Finder öffnen |
-| g | Zu Pfad springen |
+| O | Markierten Ordner im Finder öffnen |
+| F9 → g | Zu Pfad springen |
+
+Neue Dateien und Ordner (F9 → n / N) entstehen im markierten Ordner bzw. neben
+der markierten Datei.
+
+#### Remote-Prüfung beim Start
+Ist **Einstellungen (F8) → General → Check Git Remote at Startup** eingeschaltet
+(`git.check_on_startup: true`), holt die Workbench einmal pro Start den Stand des
+Repositories ab, in dem sie gestartet wurde, und bietet einen Pull an, wenn der
+Branch zurückliegt. Standardmäßig aus, weil ein Fetch die Git-Konfiguration
+dieses Repositories ausführt. Beim Navigieren in andere Repositories wird nie
+gefetcht, solange `git.auto_fetch` nicht gesetzt ist.
 
 #### Vorschau-Bereich (Nur-Lesen)
 | Taste | Aktion |

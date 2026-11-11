@@ -655,7 +655,16 @@ impl App {
                             // Check for double-click (same item within 300ms)
                             let now = std::time::Instant::now();
                             let is_double_click = self.last_click_idx == Some(idx)
-                                && now.duration_since(self.last_click_time).as_millis() < 300;
+                                && now.duration_since(self.last_click_time).as_millis()
+                                    < u128::from(self.config.file_browser.double_click_ms);
+                            // A single click on a directory's arrow or folder
+                            // icon toggles it, like a double-click on the row.
+                            let hits_marker = entry.is_dir
+                                && entry.name != ".."
+                                && ui::file_browser::hits_tree_marker(
+                                    entry.depth,
+                                    x.saturating_sub(files.x + 1) as usize,
+                                );
 
                             // Update tracking for next click
                             self.last_click_time = now;
@@ -665,7 +674,7 @@ impl App {
                             let has_unsaved =
                                 self.preview.mode == EditorMode::Edit && self.preview.is_modified();
 
-                            if is_double_click {
+                            if is_double_click || hits_marker {
                                 // Double-click: enter directory or open file
                                 let is_dir = self
                                     .file_browser

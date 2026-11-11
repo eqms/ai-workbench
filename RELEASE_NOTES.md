@@ -1,5 +1,59 @@
 # Release Notes
 
+## Version 1.17.0 (11.11.2026)
+
+The pull hint at startup is back as an opt-in, and the file browser got the
+navigation it was missing.
+
+### Added
+
+- **[ADD] Remote check for the launch directory (`git.check_on_startup`).**
+  Until v1.10.0 the workbench fetched every repository the file browser
+  entered and offered a pull when the branch was behind. v1.10.0 turned that
+  off by default (`git.auto_fetch`), because a fetch runs the browsed
+  repository's own git configuration — and with it the hint disappeared for
+  the directory you start in as well. The new option fetches only the
+  repository the workbench was started in, once per start, and shows the
+  familiar "Branch … is N commits behind remote. Pull now?" dialog. It never
+  follows navigation. Off by default; switch it on under
+  **Settings (F8) → General → Check Git Remote at Startup** or with
+  `git.check_on_startup: true`. The dialog waits until the startup screens
+  (intro, AI CLI launcher, Claude start dialog, setup wizard) are closed.
+- **[ADD] File browser: page and jump keys.** PageUp/PageDown move one page,
+  Home/End and `g`/`G` jump to the first and last entry.
+- **[ADD] File browser: re-root the tree.** `L` makes the selected directory
+  the root of the tree (for a file: its directory), `H` moves the root up one
+  level. Deep trees no longer have to be read at the right edge of the pane.
+- **[ADD] File browser: one click on the arrow or folder icon** expands or
+  collapses a directory. A double-click on the row still works; its time
+  window is configurable (`file_browser.double_click_ms`, default 300).
+
+### Changed
+
+- **[CHG] Enter on a file moves the focus to the preview.** It used to do
+  nothing, because the file was already shown.
+- **[CHG] Moving the tree up one level keeps your place.** Left on a top-level
+  entry (or Enter on `..`) used to collapse every open directory and select
+  `..`. Open directories now stay open and the directory you came from stays
+  selected.
+- **[CHG] New file, new directory, open in Finder (`O`) and pull (F9 → `p`)
+  act on the selected entry.** They used to act on the directory that was
+  expanded or collapsed last, which could be far from the highlight.
+
+### Fixed
+
+- **[FIX] Collapsing a directory no longer sends the terminal into it.**
+  Enter on an open directory closed it but still made it the current
+  directory and sent `cd` to the terminal pane. Collapsing now returns to the
+  parent directory.
+- **[FIX] The pull dialog names the repository that was checked.** If you
+  navigated into another repository while the fetch was still running, the
+  dialog would have pulled the repository you were in by then.
+- **[FIX] "Add to .gitignore" outside a repository** writes the entry next to
+  the ignored path instead of into the directory expanded last.
+- **[FIX] USAGE listed `g` as "Go to path" in the file browser.** That key was
+  never bound there; the function lives in the file menu (F9 → `g`).
+
 ## Version 1.16.0 (09.11.2026)
 
 The agent in the AI pane now shows up in terminal hosts such as Herdr.
