@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -6,17 +8,17 @@ use ratatui::{
     Frame,
 };
 
+use crate::app::pty::StartupOptions;
 use crate::types::{ClaudeEffort, ClaudeModel, ClaudePermissionMode};
 
-/// Sections inside the Claude startup dialog. Navigated via Tab / Shift+Tab.
+/// Sections inside the Claude startup dialog. Navigated via Tab / Shift+Tab
+/// or by clicking an option.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DialogSection {
     #[default]
     Permission,
     Model,
     Effort,
-    Session,
-    Worktree,
 }
 
 impl DialogSection {
@@ -24,27 +26,42 @@ impl DialogSection {
         match self {
             Self::Permission => Self::Model,
             Self::Model => Self::Effort,
-            Self::Effort => Self::Session,
-            Self::Session => Self::Worktree,
-            Self::Worktree => Self::Permission,
+            Self::Effort => Self::Permission,
         }
     }
 
     fn prev(self) -> Self {
         match self {
-            Self::Permission => Self::Worktree,
+            Self::Permission => Self::Effort,
             Self::Model => Self::Permission,
             Self::Effort => Self::Model,
-            Self::Session => Self::Effort,
-            Self::Worktree => Self::Session,
         }
     }
 }
 
-/// Unified state for the Claude startup dialog (v0.81.0+).
-///
-/// Combines permission mode, model, effort, session name and worktree into
-/// one vertical multi-section dialog.
+/// What a mouse click inside the startup dialog hit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DialogClick {
+    Permission(usize),
+    Model(usize),
+    Effort(usize),
+    Confirm,
+    Cancel,
+    /// Inside the dialog but on no control, or outside it.
+    None,
+}
+
+/// Screen areas of the clickable controls, recorded by the last render.
+#[derive(Debug, Clone, Default)]
+struct HitAreas {
+    permission_rows: Vec<Rect>,
+    model_items: Vec<Rect>,
+    effort_items: Vec<Rect>,
+    confirm: Rect,
+    cancel: Rect,
+}
+
+/// State of the Claude startup dialog: permission mode, model and effort.
 #[derive(Debug, Clone, Default)]
 pub struct PermissionModeState {
     pub visible: bool,
@@ -55,49 +72,44 @@ pub struct PermissionModeState {
     pub model_selected: usize,
     pub effort_selected: usize,
 
-    pub session_name: String,
-    pub session_cursor: usize,
+    /// Name of the project the choices are remembered for (dialog title).
+    pub project_label: String,
 
-    pub worktree: String,
-    pub worktree_cursor: usize,
+    hit_areas: HitAreas,
+    /// Last click on a permission row, to recognise a double click.
+    last_permission_click: Option<(usize, Instant)>,
+}
+
+/// Time window in which a second click on the same permission row counts as
+/// a double click (same default as the file browser).
+const DOUBLE_CLICK: Duration = Duration::from_millis(300);
+
+fn contains(rect: Rect, x: u16, y: u16) -> bool {
+    x >= rect.x && x < rect.x + rect.width && y >= rect.y && y < rect.y + rect.height
 }
 
 impl PermissionModeState {
-    /// Legacy alias for callers that don't have all defaults yet.
-    pub fn open(&mut self) {
-        self.open_with_defaults(None, ClaudeModel::Unset, ClaudeEffort::Unset, "", "");
-    }
-
-    /// Open dialog with full set of default values (called from pty.rs).
-    pub fn open_with_defaults(
-        &mut self,
-        default_mode: Option<ClaudePermissionMode>,
-        default_model: ClaudeModel,
-        default_effort: ClaudeEffort,
-        default_session_name: &str,
-        default_worktree: &str,
-    ) {
+    /// Open the dialog preselected with `defaults` — the values remembered for
+    /// the project named `project_label`.
+    pub(crate) fn open_with_defaults(&mut self, defaults: StartupOptions, project_label: String) {
         self.visible = true;
         self.confirmed = false;
         self.section = DialogSection::Permission;
+        self.project_label = project_label;
+        self.last_permission_click = None;
 
-        self.permission_selected = default_mode
-            .and_then(|m| ClaudePermissionMode::all().iter().position(|x| *x == m))
+        self.permission_selected = ClaudePermissionMode::all()
+            .iter()
+            .position(|m| *m == defaults.permission_mode)
             .unwrap_or(0);
         self.model_selected = ClaudeModel::all()
             .iter()
-            .position(|m| *m == default_model)
+            .position(|m| *m == defaults.model)
             .unwrap_or(0);
         self.effort_selected = ClaudeEffort::all()
             .iter()
-            .position(|e| *e == default_effort)
+            .position(|e| *e == defaults.effort)
             .unwrap_or(0);
-
-        self.session_name = default_session_name.to_string();
-        self.session_cursor = self.session_name.chars().count();
-
-        self.worktree = default_worktree.to_string();
-        self.worktree_cursor = self.worktree.chars().count();
     }
 
     pub fn close(&mut self) {
@@ -154,78 +166,62 @@ impl PermissionModeState {
         }
     }
 
-    // ── Text input (Session + Worktree) with UTF-8-safe cursor ───────────
+    // ── Mouse ─────────────────────────────────────────────────────────────
 
-    fn active_text_mut(&mut self) -> Option<(&mut String, &mut usize)> {
-        match self.section {
-            DialogSection::Session => Some((&mut self.session_name, &mut self.session_cursor)),
-            DialogSection::Worktree => Some((&mut self.worktree, &mut self.worktree_cursor)),
-            _ => None,
+    /// Which control lies under `(x, y)`, based on the last render.
+    pub fn hit_test(&self, x: u16, y: u16) -> DialogClick {
+        let areas = &self.hit_areas;
+        if contains(areas.confirm, x, y) {
+            return DialogClick::Confirm;
+        }
+        if contains(areas.cancel, x, y) {
+            return DialogClick::Cancel;
+        }
+        let find = |rects: &[Rect]| rects.iter().position(|r| contains(*r, x, y));
+        if let Some(i) = find(&areas.permission_rows) {
+            return DialogClick::Permission(i);
+        }
+        if let Some(i) = find(&areas.model_items) {
+            return DialogClick::Model(i);
+        }
+        if let Some(i) = find(&areas.effort_items) {
+            return DialogClick::Effort(i);
+        }
+        DialogClick::None
+    }
+
+    /// Select a permission mode by click. Returns `true` when this click is
+    /// the second one on the same row within the double-click window — the
+    /// caller then starts Claude right away.
+    pub fn click_permission(&mut self, index: usize) -> bool {
+        self.click_permission_at(index, Instant::now())
+    }
+
+    fn click_permission_at(&mut self, index: usize, now: Instant) -> bool {
+        if index >= ClaudePermissionMode::all().len() {
+            return false;
+        }
+        self.section = DialogSection::Permission;
+        self.permission_selected = index;
+        let double = matches!(
+            self.last_permission_click,
+            Some((last, at)) if last == index && now.duration_since(at) <= DOUBLE_CLICK
+        );
+        self.last_permission_click = if double { None } else { Some((index, now)) };
+        double
+    }
+
+    pub fn select_model(&mut self, index: usize) {
+        if index < ClaudeModel::all().len() {
+            self.section = DialogSection::Model;
+            self.model_selected = index;
         }
     }
 
-    pub fn insert_char(&mut self, c: char) {
-        if let Some((text, cursor)) = self.active_text_mut() {
-            let byte_pos: usize = text.chars().take(*cursor).map(|c| c.len_utf8()).sum();
-            text.insert(byte_pos, c);
-            *cursor += 1;
-        }
-    }
-
-    pub fn delete_char_before(&mut self) {
-        if let Some((text, cursor)) = self.active_text_mut() {
-            if *cursor == 0 {
-                return;
-            }
-            let byte_start: usize = text.chars().take(*cursor - 1).map(|c| c.len_utf8()).sum();
-            if let Some(ch) = text.chars().nth(*cursor - 1) {
-                let byte_end = byte_start + ch.len_utf8();
-                text.replace_range(byte_start..byte_end, "");
-                *cursor -= 1;
-            }
-        }
-    }
-
-    pub fn delete_char_at(&mut self) {
-        if let Some((text, cursor)) = self.active_text_mut() {
-            let len = text.chars().count();
-            if *cursor >= len {
-                return;
-            }
-            let byte_start: usize = text.chars().take(*cursor).map(|c| c.len_utf8()).sum();
-            if let Some(ch) = text.chars().nth(*cursor) {
-                let byte_end = byte_start + ch.len_utf8();
-                text.replace_range(byte_start..byte_end, "");
-            }
-        }
-    }
-
-    pub fn cursor_left(&mut self) {
-        if let Some((_, cursor)) = self.active_text_mut() {
-            if *cursor > 0 {
-                *cursor -= 1;
-            }
-        }
-    }
-
-    pub fn cursor_right(&mut self) {
-        if let Some((text, cursor)) = self.active_text_mut() {
-            let len = text.chars().count();
-            if *cursor < len {
-                *cursor += 1;
-            }
-        }
-    }
-
-    pub fn cursor_home(&mut self) {
-        if let Some((_, cursor)) = self.active_text_mut() {
-            *cursor = 0;
-        }
-    }
-
-    pub fn cursor_end(&mut self) {
-        if let Some((text, cursor)) = self.active_text_mut() {
-            *cursor = text.chars().count();
+    pub fn select_effort(&mut self, index: usize) {
+        if index < ClaudeEffort::all().len() {
+            self.section = DialogSection::Effort;
+            self.effort_selected = index;
         }
     }
 
@@ -251,18 +247,31 @@ impl PermissionModeState {
             .copied()
             .unwrap_or_default()
     }
-
-    pub fn is_text_field_active(&self) -> bool {
-        matches!(
-            self.section,
-            DialogSection::Session | DialogSection::Worktree
-        )
-    }
 }
 
 // ─── Render ──────────────────────────────────────────────────────────────
 
-pub fn render(frame: &mut Frame, area: Rect, state: &PermissionModeState) {
+/// Width of a radio item as rendered: `prefix` + marker `(•)` + space + name.
+fn radio_width(prefix: &str, name: &str) -> u16 {
+    (prefix.chars().count() + 3 + 1 + name.chars().count()) as u16
+}
+
+/// Horizontal areas of consecutive items of the given widths in `row`,
+/// clipped to the row.
+fn item_rects(row: Rect, widths: impl Iterator<Item = u16>) -> Vec<Rect> {
+    let right = row.x + row.width;
+    let mut x = row.x;
+    widths
+        .map(|width| {
+            let start = x.min(right);
+            let end = x.saturating_add(width).min(right);
+            x = x.saturating_add(width);
+            Rect::new(start, row.y, end - start, row.height)
+        })
+        .collect()
+}
+
+pub fn render(frame: &mut Frame, area: Rect, state: &mut PermissionModeState) {
     if !state.visible {
         return;
     }
@@ -271,10 +280,10 @@ pub fn render(frame: &mut Frame, area: Rect, state: &PermissionModeState) {
     let models = ClaudeModel::all();
     let efforts = ClaudeEffort::all();
 
-    let popup_width: u16 = 76;
-    // Dynamic height: title(2) + permission-list(len+1) + model(2) + effort(2)
-    //                 + session(3) + footer(2) + borders(2)
-    let popup_height: u16 = (modes.len() as u16 + 15).min(area.height.saturating_sub(2));
+    let popup_width: u16 = 80.min(area.width);
+    // borders(2) + padding(2) + title(2) + permission(len+1) + model(2)
+    // + effort(2) + spacer(1) + footer(1)
+    let popup_height: u16 = (modes.len() as u16 + 13).min(area.height.saturating_sub(2));
 
     let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
     let popup_y = area.y + (area.height.saturating_sub(popup_height)) / 2;
@@ -282,10 +291,15 @@ pub fn render(frame: &mut Frame, area: Rect, state: &PermissionModeState) {
 
     frame.render_widget(Clear, popup_area);
 
+    let title = if state.project_label.is_empty() {
+        " Claude Code Startup ".to_string()
+    } else {
+        format!(" Claude Code Startup — {} ", state.project_label)
+    };
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan))
-        .title(" Claude Code Startup ")
+        .title(title)
         .title_style(
             Style::default()
                 .fg(Color::Cyan)
@@ -298,24 +312,24 @@ pub fn render(frame: &mut Frame, area: Rect, state: &PermissionModeState) {
         Constraint::Length(modes.len() as u16 + 1), // Permission list + header
         Constraint::Length(2),                      // Model (header + row)
         Constraint::Length(2),                      // Effort (header + row)
-        Constraint::Length(3),                      // Session (header + 2 rows: Name + Worktree)
-        Constraint::Min(2),                         // Footer
+        Constraint::Length(1),                      // Spacer
+        Constraint::Length(1),                      // Footer buttons
     ])
+    // Margin = border (1) + one cell of padding on every side.
     .split(popup_area.inner(ratatui::layout::Margin {
         horizontal: 2,
-        vertical: 1,
+        vertical: 2,
     }));
 
     render_title(frame, chunks[0]);
     render_permission_section(frame, chunks[1], state, modes);
     render_model_section(frame, chunks[2], state, models);
     render_effort_section(frame, chunks[3], state, efforts);
-    render_session_section(frame, chunks[4], state);
-    render_footer(frame, chunks[5]);
+    render_footer(frame, chunks[5], state);
 }
 
 fn render_title(frame: &mut Frame, area: Rect) {
-    let text = Paragraph::new("Claude Code Startup-Optionen — Tab wechselt Sektion:")
+    let text = Paragraph::new("Klick oder Tab/Pfeiltasten — die Auswahl wird pro Projekt gemerkt.")
         .style(Style::default().fg(Color::White));
     frame.render_widget(text, area);
 }
@@ -323,7 +337,7 @@ fn render_title(frame: &mut Frame, area: Rect) {
 fn render_permission_section(
     frame: &mut Frame,
     area: Rect,
-    state: &PermissionModeState,
+    state: &mut PermissionModeState,
     modes: &[ClaudePermissionMode],
 ) {
     let is_active = state.section == DialogSection::Permission;
@@ -331,7 +345,11 @@ fn render_permission_section(
     let header = Line::from(vec![
         Span::styled("[ Permission Mode ]", header_style),
         Span::styled(
-            if is_active { "  ↑↓ wählen" } else { "" },
+            if is_active {
+                "  ↑↓ wählen · Doppelklick startet"
+            } else {
+                ""
+            },
             Style::default().fg(Color::DarkGray),
         ),
     ]);
@@ -386,13 +404,22 @@ fn render_permission_section(
         lines.push(ListItem::new(line));
     }
 
+    // Row i of the list sits one line below the header; rows cut off by a
+    // too-small terminal get no click area.
+    let bottom = area.y + area.height;
+    state.hit_areas.permission_rows = (0..modes.len() as u16)
+        .map(|i| area.y + 1 + i)
+        .filter(|y| *y < bottom)
+        .map(|y| Rect::new(area.x, y, area.width, 1))
+        .collect();
+
     frame.render_widget(List::new(lines), area);
 }
 
 fn render_model_section(
     frame: &mut Frame,
     area: Rect,
-    state: &PermissionModeState,
+    state: &mut PermissionModeState,
     models: &[ClaudeModel],
 ) {
     let is_active = state.section == DialogSection::Model;
@@ -407,33 +434,24 @@ fn render_model_section(
     ]));
     frame.render_widget(header, chunks[0]);
 
-    let mut spans: Vec<Span> = Vec::new();
-    for (i, model) in models.iter().enumerate() {
-        let is_selected = i == state.model_selected;
-        let marker = if is_selected { "(•)" } else { "( )" };
-        let style = if is_selected {
-            Style::default()
-                .fg(if is_active {
-                    Color::Yellow
-                } else {
-                    Color::White
-                })
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::Gray)
-        };
-        spans.push(Span::styled(
-            format!("  {} {}", marker, model.name()),
-            style,
-        ));
-    }
+    const PREFIX: &str = "  ";
+    let spans = radio_spans(
+        PREFIX,
+        models.iter().map(|m| m.name()),
+        state.model_selected,
+        is_active,
+    );
+    state.hit_areas.model_items = item_rects(
+        chunks[1],
+        models.iter().map(|m| radio_width(PREFIX, m.name())),
+    );
     frame.render_widget(Paragraph::new(Line::from(spans)), chunks[1]);
 }
 
 fn render_effort_section(
     frame: &mut Frame,
     area: Rect,
-    state: &PermissionModeState,
+    state: &mut PermissionModeState,
     efforts: &[ClaudeEffort],
 ) {
     let is_active = state.section == DialogSection::Effort;
@@ -448,156 +466,79 @@ fn render_effort_section(
     ]));
     frame.render_widget(header, chunks[0]);
 
-    let mut spans: Vec<Span> = Vec::new();
-    for (i, effort) in efforts.iter().enumerate() {
-        let is_selected = i == state.effort_selected;
-        let marker = if is_selected { "(•)" } else { "( )" };
-        let style = if is_selected {
-            Style::default()
-                .fg(if is_active {
-                    Color::Yellow
-                } else {
-                    Color::White
-                })
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::Gray)
-        };
-        spans.push(Span::styled(
-            format!(" {} {}", marker, effort.name()),
-            style,
-        ));
-    }
+    const PREFIX: &str = " ";
+    let spans = radio_spans(
+        PREFIX,
+        efforts.iter().map(|e| e.name()),
+        state.effort_selected,
+        is_active,
+    );
+    state.hit_areas.effort_items = item_rects(
+        chunks[1],
+        efforts.iter().map(|e| radio_width(PREFIX, e.name())),
+    );
     frame.render_widget(Paragraph::new(Line::from(spans)), chunks[1]);
 }
 
-fn render_session_section(frame: &mut Frame, area: Rect, state: &PermissionModeState) {
-    let session_active = state.section == DialogSection::Session;
-    let worktree_active = state.section == DialogSection::Worktree;
-    let either_active = session_active || worktree_active;
-
-    let chunks = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
-
-    let header = Paragraph::new(Line::from(vec![
-        Span::styled("[ Session ]", section_header_style(either_active)),
-        Span::styled(
-            if either_active {
-                "  Tab wechselt Feld"
+fn radio_spans<'a>(
+    prefix: &str,
+    names: impl Iterator<Item = &'a str>,
+    selected: usize,
+    is_active: bool,
+) -> Vec<Span<'static>> {
+    names
+        .enumerate()
+        .map(|(i, name)| {
+            let is_selected = i == selected;
+            let marker = if is_selected { "(•)" } else { "( )" };
+            let style = if is_selected {
+                Style::default()
+                    .fg(if is_active {
+                        Color::Yellow
+                    } else {
+                        Color::White
+                    })
+                    .add_modifier(Modifier::BOLD)
             } else {
-                ""
-            },
-            Style::default().fg(Color::DarkGray),
-        ),
-    ]));
-    frame.render_widget(header, chunks[0]);
-
-    frame.render_widget(
-        text_field_line(
-            "Name:    ",
-            &state.session_name,
-            state.session_cursor,
-            session_active,
-        ),
-        chunks[1],
-    );
-    frame.render_widget(
-        text_field_line(
-            "Worktree:",
-            &state.worktree,
-            state.worktree_cursor,
-            worktree_active,
-        ),
-        chunks[2],
-    );
+                Style::default().fg(Color::Gray)
+            };
+            Span::styled(format!("{}{} {}", prefix, marker, name), style)
+        })
+        .collect()
 }
 
-fn text_field_line<'a>(
-    label: &'a str,
-    text: &'a str,
-    cursor: usize,
-    active: bool,
-) -> Paragraph<'a> {
-    let label_style = if active {
-        Style::default()
-            .fg(Color::Yellow)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::Gray)
-    };
+fn render_footer(frame: &mut Frame, area: Rect, state: &mut PermissionModeState) {
+    // (key, label, style of key); the first two are clickable buttons.
+    const CONFIRM: (&str, &str) = (" Enter ", " Starten ");
+    const CANCEL: (&str, &str) = (" Esc ", " Gemerkte Werte ");
+    const TAB: (&str, &str) = (" Tab ", " Sektion");
+    const GAP: &str = "  ";
 
-    // Render text with visible cursor if active
-    let mut text_spans: Vec<Span> = Vec::new();
-    if active {
-        let chars: Vec<char> = text.chars().collect();
-        for (i, ch) in chars.iter().enumerate() {
-            if i == cursor {
-                text_spans.push(Span::styled(
-                    ch.to_string(),
-                    Style::default().bg(Color::Yellow).fg(Color::Black),
-                ));
-            } else {
-                text_spans.push(Span::styled(
-                    ch.to_string(),
-                    Style::default().fg(Color::White),
-                ));
-            }
-        }
-        // Cursor at end of text
-        if cursor >= chars.len() {
-            text_spans.push(Span::styled(
-                " ",
-                Style::default().bg(Color::Yellow).fg(Color::Black),
-            ));
-        }
-    } else if text.is_empty() {
-        text_spans.push(Span::styled(
-            "(leer)",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::ITALIC),
-        ));
-    } else {
-        text_spans.push(Span::styled(
-            text.to_string(),
-            Style::default().fg(Color::White),
-        ));
-    }
+    let width = |(key, label): (&str, &str)| (key.chars().count() + label.chars().count()) as u16;
+    let rects = item_rects(
+        area,
+        [width(CONFIRM), GAP.len() as u16, width(CANCEL)].into_iter(),
+    );
+    state.hit_areas.confirm = rects[0];
+    state.hit_areas.cancel = rects[2];
 
-    let marker = if active { "▸ " } else { "  " };
-    let mut spans = vec![
-        Span::styled(
-            marker,
-            Style::default().fg(if active {
-                Color::Yellow
-            } else {
-                Color::DarkGray
-            }),
-        ),
-        Span::styled(format!("{} ", label), label_style),
-    ];
-    spans.extend(text_spans);
-    Paragraph::new(Line::from(spans))
-}
-
-fn render_footer(frame: &mut Frame, area: Rect) {
     let footer = Line::from(vec![
-        Span::styled(" Enter ", Style::default().bg(Color::Cyan).fg(Color::Black)),
-        Span::raw(" Bestätigen  "),
+        Span::styled(CONFIRM.0, Style::default().bg(Color::Cyan).fg(Color::Black)),
         Span::styled(
-            " Tab ",
+            CONFIRM.1,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(GAP),
+        Span::styled(
+            CANCEL.0,
             Style::default().bg(Color::DarkGray).fg(Color::White),
         ),
-        Span::raw(" Sektion  "),
-        Span::styled(
-            " Esc ",
-            Style::default().bg(Color::DarkGray).fg(Color::White),
-        ),
-        Span::raw(" Standard"),
+        Span::raw(CANCEL.1),
+        Span::raw(GAP),
+        Span::styled(TAB.0, Style::default().bg(Color::DarkGray).fg(Color::White)),
+        Span::styled(TAB.1, Style::default().fg(Color::DarkGray)),
     ]);
     frame.render_widget(Paragraph::new(footer), area);
 }
@@ -609,5 +550,124 @@ fn section_header_style(active: bool) -> Style {
             .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn rendered_state() -> PermissionModeState {
+        let mut state = PermissionModeState::default();
+        state.open_with_defaults(StartupOptions::default(), "demo".to_string());
+        let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &mut state))
+            .unwrap();
+        state
+    }
+
+    fn center(rect: Rect) -> (u16, u16) {
+        (rect.x + rect.width / 2, rect.y)
+    }
+
+    #[test]
+    fn every_option_and_button_is_clickable() {
+        let state = rendered_state();
+        let areas = state.hit_areas.clone();
+        assert_eq!(
+            areas.permission_rows.len(),
+            ClaudePermissionMode::all().len()
+        );
+        assert_eq!(areas.model_items.len(), ClaudeModel::all().len());
+        assert_eq!(areas.effort_items.len(), ClaudeEffort::all().len());
+
+        for (i, rect) in areas.permission_rows.iter().enumerate() {
+            let (x, y) = center(*rect);
+            assert_eq!(state.hit_test(x, y), DialogClick::Permission(i));
+        }
+        for (i, rect) in areas.model_items.iter().enumerate() {
+            let (x, y) = center(*rect);
+            assert_eq!(state.hit_test(x, y), DialogClick::Model(i));
+        }
+        for (i, rect) in areas.effort_items.iter().enumerate() {
+            let (x, y) = center(*rect);
+            assert_eq!(state.hit_test(x, y), DialogClick::Effort(i));
+        }
+        let (x, y) = center(areas.confirm);
+        assert_eq!(state.hit_test(x, y), DialogClick::Confirm);
+        let (x, y) = center(areas.cancel);
+        assert_eq!(state.hit_test(x, y), DialogClick::Cancel);
+        assert_eq!(state.hit_test(0, 0), DialogClick::None);
+    }
+
+    #[test]
+    fn model_click_areas_cover_the_rendered_labels() {
+        // The "Opus" label must sit inside the area that selects Opus.
+        let mut state = PermissionModeState::default();
+        state.open_with_defaults(StartupOptions::default(), String::new());
+        let mut terminal = Terminal::new(TestBackend::new(100, 40)).unwrap();
+        terminal
+            .draw(|frame| render(frame, frame.area(), &mut state))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let opus = ClaudeModel::all()
+            .iter()
+            .position(|m| m.name() == "Opus")
+            .expect("Opus is offered");
+        let rect = state.hit_areas.model_items[opus];
+        let text: String = (rect.x..rect.x + rect.width)
+            .map(|x| buffer[(x, rect.y)].symbol().to_string())
+            .collect();
+        assert!(text.contains("Opus"), "area shows {text:?}");
+    }
+
+    #[test]
+    fn clicks_select_options_and_switch_section() {
+        let mut state = rendered_state();
+        state.select_model(2);
+        assert_eq!(state.section, DialogSection::Model);
+        assert_eq!(state.model_selected, 2);
+        state.select_effort(3);
+        assert_eq!(state.section, DialogSection::Effort);
+        assert_eq!(state.effort_selected, 3);
+        // Out-of-range indices are ignored.
+        state.select_effort(99);
+        assert_eq!(state.effort_selected, 3);
+    }
+
+    #[test]
+    fn second_click_on_same_permission_row_is_a_double_click() {
+        let mut state = rendered_state();
+        let t0 = Instant::now();
+        assert!(!state.click_permission_at(2, t0));
+        assert_eq!(state.permission_selected, 2);
+        assert!(state.click_permission_at(2, t0 + Duration::from_millis(200)));
+    }
+
+    #[test]
+    fn slow_or_different_second_click_is_no_double_click() {
+        let mut state = rendered_state();
+        let t0 = Instant::now();
+        assert!(!state.click_permission_at(1, t0));
+        assert!(!state.click_permission_at(2, t0 + Duration::from_millis(100)));
+        assert!(!state.click_permission_at(2, t0 + Duration::from_millis(900)));
+    }
+
+    #[test]
+    fn open_preselects_the_remembered_values() {
+        let mut state = PermissionModeState::default();
+        state.open_with_defaults(
+            StartupOptions {
+                permission_mode: ClaudePermissionMode::Auto,
+                model: ClaudeModel::Opus,
+                effort: ClaudeEffort::High,
+            },
+            "p".to_string(),
+        );
+        assert_eq!(state.selected_permission_mode(), ClaudePermissionMode::Auto);
+        assert_eq!(state.selected_model(), ClaudeModel::Opus);
+        assert_eq!(state.selected_effort(), ClaudeEffort::High);
     }
 }

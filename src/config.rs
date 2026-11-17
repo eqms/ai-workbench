@@ -252,7 +252,8 @@ pub struct ClaudeConfig {
     /// Startup prefixes shown in dialog
     #[serde(default)]
     pub startup_prefixes: Vec<ClaudePrefix>,
-    /// Default permission mode (if set, skips the dialog)
+    /// Last permission mode confirmed in the startup dialog, in any project.
+    /// Fallback for projects without their own entry in `session.yaml`.
     #[serde(default)]
     pub default_permission_mode: Option<ClaudePermissionMode>,
     /// Show permission mode selection dialog at startup (default: true)
@@ -268,10 +269,12 @@ pub struct ClaudeConfig {
     /// Default reasoning effort level (--effort flag)
     #[serde(default)]
     pub default_effort: ClaudeEffort,
-    /// Default session name (--name flag, empty = not passed)
+    /// Ignored since v1.18.0 (the startup dialog no longer offers a session
+    /// name). Kept so existing config files keep loading and saving unchanged.
     #[serde(default)]
     pub default_session_name: String,
-    /// Default worktree name (--worktree flag, empty = not passed)
+    /// Ignored since v1.18.0 (the startup dialog no longer offers a worktree).
+    /// Kept so existing config files keep loading and saving unchanged.
     #[serde(default)]
     pub default_worktree: String,
 }

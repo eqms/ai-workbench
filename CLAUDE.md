@@ -184,9 +184,11 @@ git:
   check_on_startup: false
 ```
 
-Session persistence (`src/session.rs`) is global, not per project: it stores
-the last-used AI backend and the date of the daily `claude update` in
-`~/.config/ai-workbench/session.yaml`. Saving is best-effort and silent.
+Session persistence (`src/session.rs`) lives in one global file,
+`~/.config/ai-workbench/session.yaml`: the last-used AI backend, the date of
+the daily `claude update`, and the Claude startup choices per project
+(`projects`, keyed by the enclosing `.git` directory). Never write per-project
+state into the project itself. Saving is best-effort and silent.
 
 ## Conventions
 

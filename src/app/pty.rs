@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::backend::AiBackend;
 use crate::config::Config;
+use crate::session::{ProjectStartup, SessionState};
 use crate::terminal::PseudoTerminal;
 use crate::types::{ClaudeEffort, ClaudeModel, ClaudePermissionMode, PaneId};
 use crate::update::log_update;
@@ -9,13 +10,41 @@ use crate::update::log_update;
 use super::App;
 
 /// Bundled Claude Code startup options, assembled from dialog state + config.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct StartupOptions {
     pub permission_mode: ClaudePermissionMode,
     pub model: ClaudeModel,
     pub effort: ClaudeEffort,
-    pub session_name: String,
-    pub worktree: String,
+}
+
+impl StartupOptions {
+    /// The choices to start with: what was last confirmed in this project,
+    /// otherwise the last choice made anywhere (the global config defaults).
+    pub(crate) fn resolve(config: &Config, session: &SessionState, project_key: &str) -> Self {
+        match session.projects.get(project_key) {
+            Some(saved) => Self {
+                permission_mode: saved.permission_mode,
+                model: saved.model,
+                effort: saved.effort,
+            },
+            None => Self {
+                permission_mode: config
+                    .claude
+                    .default_permission_mode
+                    .unwrap_or(ClaudePermissionMode::Default),
+                model: config.claude.default_model,
+                effort: config.claude.default_effort,
+            },
+        }
+    }
+}
+
+/// Short name of a project for display: the last path component of its key.
+pub(super) fn project_label(project_key: &str) -> String {
+    Path::new(project_key)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| project_key.to_string())
 }
 
 impl App {
@@ -66,18 +95,6 @@ impl App {
                     cmd.push("--effort".to_string());
                     cmd.push(effort.to_string());
                 }
-            }
-
-            // Session name (--name)
-            if !opts.session_name.is_empty() && !cmd.iter().any(|a| a == "--name") {
-                cmd.push("--name".to_string());
-                cmd.push(opts.session_name.clone());
-            }
-
-            // Worktree (--worktree)
-            if !opts.worktree.is_empty() && !cmd.iter().any(|a| a == "--worktree") {
-                cmd.push("--worktree".to_string());
-                cmd.push(opts.worktree.clone());
             }
         }
 
@@ -147,6 +164,56 @@ impl App {
         self.active_pane = PaneId::Claude;
     }
 
+    /// Startup options remembered for the launch project (see
+    /// [`StartupOptions::resolve`]).
+    pub(super) fn remembered_startup_options(&self) -> StartupOptions {
+        StartupOptions::resolve(&self.config, &self.session, &self.project_key)
+    }
+
+    /// Enter / „Starten“ in the startup dialog: start Claude with the dialog's
+    /// values and remember them for this project. They also become the global
+    /// default, so a project opened for the first time starts with the most
+    /// recent choice.
+    pub(super) fn confirm_permission_mode_dialog(&mut self) {
+        let opts = StartupOptions {
+            permission_mode: self.permission_mode_dialog.selected_permission_mode(),
+            model: self.permission_mode_dialog.selected_model(),
+            effort: self.permission_mode_dialog.selected_effort(),
+        };
+        self.permission_mode_dialog.confirm();
+
+        self.session.projects.insert(
+            self.project_key.clone(),
+            ProjectStartup {
+                permission_mode: opts.permission_mode,
+                model: opts.model,
+                effort: opts.effort,
+            },
+        );
+        crate::session::save_session(&self.session);
+
+        self.config.claude.default_permission_mode = Some(opts.permission_mode);
+        self.config.claude.default_model = opts.model;
+        self.config.claude.default_effort = opts.effort;
+        let _ = crate::config::save_config(&self.config);
+
+        if self.claude_pty_pending {
+            self.init_claude_pty(opts);
+        }
+        self.active_pane = PaneId::Claude;
+    }
+
+    /// Esc / „Standard“ in the startup dialog: start Claude with the remembered
+    /// values, without saving anything.
+    pub(super) fn cancel_permission_mode_dialog(&mut self) {
+        self.permission_mode_dialog.close();
+        if self.claude_pty_pending {
+            let opts = self.remembered_startup_options();
+            self.init_claude_pty(opts);
+        }
+        self.active_pane = PaneId::Claude;
+    }
+
     /// Initialize Claude PTY after wizard completion
     /// Shows permission mode dialog if configured, otherwise starts Claude directly
     pub(super) fn init_claude_after_wizard(&mut self) {
@@ -159,25 +226,11 @@ impl App {
 
         if should_show_permission_dialog {
             self.claude_pty_pending = true;
-            self.permission_mode_dialog.open_with_defaults(
-                self.config.claude.default_permission_mode,
-                self.config.claude.default_model,
-                self.config.claude.default_effort,
-                &self.config.claude.default_session_name,
-                &self.config.claude.default_worktree,
-            );
+            let opts = self.remembered_startup_options();
+            self.permission_mode_dialog
+                .open_with_defaults(opts, project_label(&self.project_key));
         } else if self.backend.supports_claude_flags() {
-            let opts = StartupOptions {
-                permission_mode: self
-                    .config
-                    .claude
-                    .default_permission_mode
-                    .unwrap_or(ClaudePermissionMode::Default),
-                model: self.config.claude.default_model,
-                effort: self.config.claude.default_effort,
-                session_name: self.config.claude.default_session_name.clone(),
-                worktree: self.config.claude.default_worktree.clone(),
-            };
+            let opts = self.remembered_startup_options();
             self.init_claude_pty(opts);
             self.active_pane = PaneId::Claude;
         } else {
@@ -606,8 +659,6 @@ mod tests {
             permission_mode: ClaudePermissionMode::Default,
             model: ClaudeModel::Unset,
             effort: ClaudeEffort::Unset,
-            session_name: String::new(),
-            worktree: String::new(),
         }
     }
 
@@ -656,26 +707,6 @@ mod tests {
     }
 
     #[test]
-    fn test_build_command_with_session_name() {
-        let cfg = config_with_claude_command();
-        let mut opts = base_opts();
-        opts.session_name = "test-session".to_string();
-        let cmd = App::build_ai_command(&cfg, AiBackend::Claude, &opts);
-        assert!(cmd.contains(&"--name".to_string()));
-        assert!(cmd.contains(&"test-session".to_string()));
-    }
-
-    #[test]
-    fn test_build_command_with_worktree() {
-        let cfg = config_with_claude_command();
-        let mut opts = base_opts();
-        opts.worktree = "feature-x".to_string();
-        let cmd = App::build_ai_command(&cfg, AiBackend::Claude, &opts);
-        assert!(cmd.contains(&"--worktree".to_string()));
-        assert!(cmd.contains(&"feature-x".to_string()));
-    }
-
-    #[test]
     fn test_build_command_yolo_mode_uses_dangerously_skip() {
         let cfg = config_with_claude_command();
         let mut opts = base_opts();
@@ -703,8 +734,6 @@ mod tests {
             permission_mode: ClaudePermissionMode::Auto,
             model: ClaudeModel::Opus,
             effort: ClaudeEffort::Max,
-            session_name: "session1".to_string(),
-            worktree: "feat".to_string(),
         };
         let cmd = App::build_ai_command(&cfg, AiBackend::Claude, &opts);
         assert_eq!(cmd[0], "claude");
@@ -714,10 +743,48 @@ mod tests {
         assert!(cmd.contains(&"opus".to_string()));
         assert!(cmd.contains(&"--effort".to_string()));
         assert!(cmd.contains(&"max".to_string()));
-        assert!(cmd.contains(&"--name".to_string()));
-        assert!(cmd.contains(&"session1".to_string()));
-        assert!(cmd.contains(&"--worktree".to_string()));
-        assert!(cmd.contains(&"feat".to_string()));
+    }
+
+    #[test]
+    fn resolve_prefers_the_project_choice_over_the_global_default() {
+        let mut cfg = Config::default();
+        cfg.claude.default_permission_mode = Some(ClaudePermissionMode::Plan);
+        cfg.claude.default_model = ClaudeModel::Sonnet;
+        let mut session = SessionState::default();
+        session.projects.insert(
+            "/work/alpha".to_string(),
+            ProjectStartup {
+                permission_mode: ClaudePermissionMode::Auto,
+                model: ClaudeModel::Opus,
+                effort: ClaudeEffort::High,
+            },
+        );
+
+        let alpha = StartupOptions::resolve(&cfg, &session, "/work/alpha");
+        assert_eq!(alpha.permission_mode, ClaudePermissionMode::Auto);
+        assert_eq!(alpha.model, ClaudeModel::Opus);
+        assert_eq!(alpha.effort, ClaudeEffort::High);
+
+        // A project without its own entry falls back to the global default.
+        let beta = StartupOptions::resolve(&cfg, &session, "/work/beta");
+        assert_eq!(beta.permission_mode, ClaudePermissionMode::Plan);
+        assert_eq!(beta.model, ClaudeModel::Sonnet);
+        assert_eq!(beta.effort, ClaudeEffort::Unset);
+    }
+
+    #[test]
+    fn resolve_without_any_saved_choice_uses_default_mode() {
+        let opts = StartupOptions::resolve(&Config::default(), &SessionState::default(), "/x");
+        assert_eq!(opts.permission_mode, ClaudePermissionMode::Default);
+    }
+
+    #[test]
+    fn project_label_is_the_last_path_component() {
+        assert_eq!(
+            project_label("/Users/me/gitbase/ai-workbench"),
+            "ai-workbench"
+        );
+        assert_eq!(project_label("/"), "/");
     }
 
     #[test]
@@ -727,7 +794,6 @@ mod tests {
             permission_mode: ClaudePermissionMode::Auto,
             model: ClaudeModel::Opus,
             effort: ClaudeEffort::High,
-            ..base_opts()
         };
         let cmd = App::build_ai_command(&cfg, AiBackend::OpenCode, &opts);
         assert_eq!(cmd[0], "opencode");
@@ -751,7 +817,6 @@ mod tests {
             permission_mode: ClaudePermissionMode::Auto,
             model: ClaudeModel::Opus,
             effort: ClaudeEffort::High,
-            ..base_opts()
         };
         let cmd = App::build_ai_command(&cfg, AiBackend::Codex, &opts);
         assert_eq!(cmd[0], "codex");

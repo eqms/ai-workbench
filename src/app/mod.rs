@@ -7,7 +7,7 @@ mod git_ops;
 mod job_state;
 mod keyboard;
 mod mouse;
-mod pty;
+pub(crate) mod pty;
 mod ssh_paste;
 mod update;
 
@@ -71,6 +71,9 @@ impl Default for SavedLayout {
 pub struct App {
     pub config: Config,
     pub session: SessionState,
+    /// Project the workbench was launched in; key for the remembered Claude
+    /// startup choices in `session.projects`.
+    pub project_key: String,
     /// The AI backend driven in the primary pane (Claude / OpenCode / Pi).
     pub backend: AiBackend,
     pub should_quit: bool,
@@ -222,6 +225,11 @@ impl App {
         let mut agent_startup = ui::agent_startup::AgentStartupState::default();
         let mut backend_switch = ui::backend_switch::BackendSwitchState::default();
         let mut claude_permission_mode = ClaudePermissionMode::Default;
+        // Startup choices are remembered per project (the repository the
+        // workbench was launched in), see `session::project_key`.
+        let project_key = crate::session::project_key(&cwd);
+        let startup_opts =
+            crate::app::pty::StartupOptions::resolve(&config, &session, &project_key);
         // Determine if we should show permission mode dialog.
         // Only Claude understands permission/model/effort flags — OpenCode and Pi
         // start directly. Also skip if the wizard needs to run first (first-time setup).
@@ -250,30 +258,14 @@ impl App {
             // Delay Claude PTY creation until permission mode is selected
             claude_pty_pending = true;
             if should_show_permission_dialog {
-                permission_mode_dialog.open_with_defaults(
-                    config.claude.default_permission_mode,
-                    config.claude.default_model,
-                    config.claude.default_effort,
-                    &config.claude.default_session_name,
-                    &config.claude.default_worktree,
-                );
+                permission_mode_dialog
+                    .open_with_defaults(startup_opts, pty::project_label(&project_key));
             }
             claude_command_str = String::new();
         } else {
-            // Use configured default permission mode or Default
-            claude_permission_mode = config
-                .claude
-                .default_permission_mode
-                .unwrap_or(ClaudePermissionMode::Default);
-
-            // Build Claude command with persisted startup options
-            let opts = crate::app::pty::StartupOptions {
-                permission_mode: claude_permission_mode,
-                model: config.claude.default_model,
-                effort: config.claude.default_effort,
-                session_name: config.claude.default_session_name.clone(),
-                worktree: config.claude.default_worktree.clone(),
-            };
+            // Start with what was last chosen in this project
+            claude_permission_mode = startup_opts.permission_mode;
+            let opts = startup_opts;
             let claude_cmd = Self::build_ai_command(&config, backend, &opts);
             claude_command_str = claude_cmd.join(" ");
 
@@ -349,6 +341,7 @@ impl App {
         let mut app = Self {
             config,
             session,
+            project_key,
             backend,
             should_quit: false,
             should_restart: false,

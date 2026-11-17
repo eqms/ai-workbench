@@ -1,5 +1,44 @@
 # Release Notes
 
+## Version 1.18.0 (17.11.2026)
+
+The Claude startup dialog works with the mouse and remembers its choices per
+project.
+
+### Added
+
+- **[ADD] Mouse support in the Claude startup dialog.** A click selects a
+  permission mode, model or effort; a double-click on a permission mode starts
+  Claude right away. **Starten** and **Gemerkte Werte** in the footer are
+  buttons that do what Enter and Esc do.
+- **[ADD] Startup choices are remembered per project.** Enter stores permission
+  mode, model and effort for the project the workbench was launched in — the
+  nearest directory above containing `.git`, otherwise the launch directory —
+  and preselects them on the next start there. Also applies when the dialog is
+  switched off. Stored in `~/.config/ai-workbench/session.yaml` under
+  `projects`, never inside the repository. A project without its own entry
+  starts with the most recent choice made anywhere (`claude.default_*` in
+  `config.yaml`, as before). The dialog title names the project.
+
+### Changed
+
+- **[CHG] Session name and worktree removed from the startup dialog.** The
+  dialog no longer passes `--name` or `--worktree`, and the config keys
+  `claude.default_session_name` / `claude.default_worktree` are ignored (they
+  still load, so existing files stay valid). A value left there could otherwise
+  keep starting Claude in a worktree with no visible field to clear it. Put the
+  flag into `pty.claude_command` to use it permanently.
+
+### Fixed
+
+- **[FIX] A click on the startup dialog started Claude in `default` mode.**
+  Any mouse press — inside the dialog as well as outside — closed it and
+  started Claude with permission mode `default`, ignoring both the selection
+  and the saved value. Clicks outside the dialog are now ignored.
+- **[FIX] Dialog layout.** The inner padding did not account for the border,
+  leaving two empty rows at the bottom; the dialog is four columns wider so
+  the `auto` description is no longer cut off.
+
 ## Version 1.17.0 (11.11.2026)
 
 The pull hint at startup is back as an opt-in, and the file browser got the

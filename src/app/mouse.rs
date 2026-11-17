@@ -3,7 +3,7 @@ use ratatui::layout::Rect;
 
 use crate::browser;
 use crate::terminal::{mode_reports, MouseButtonEvent, WheelDirection};
-use crate::types::{ClaudePermissionMode, EditorMode, PaneId, ResizeBorder, ScrollbarAxis};
+use crate::types::{EditorMode, PaneId, ResizeBorder, ScrollbarAxis};
 use crate::ui;
 
 use super::App;
@@ -504,21 +504,29 @@ impl App {
                     return;
                 }
 
-                // Permission mode dialog - click outside uses default mode
+                // Claude startup dialog: clicks select options and press the
+                // buttons. A click outside does nothing — it used to start
+                // Claude in `default` mode, which a stray click must not do.
                 // Skip if update dialog is visible - update takes priority
                 if self.permission_mode_dialog.visible && !self.update_state.show_dialog {
-                    self.permission_mode_dialog.close();
-                    if self.claude_pty_pending {
-                        let opts = crate::app::pty::StartupOptions {
-                            permission_mode: ClaudePermissionMode::Default,
-                            model: self.config.claude.default_model,
-                            effort: self.config.claude.default_effort,
-                            session_name: self.config.claude.default_session_name.clone(),
-                            worktree: self.config.claude.default_worktree.clone(),
-                        };
-                        self.init_claude_pty(opts);
+                    use crate::ui::permission_mode::DialogClick;
+                    match self.permission_mode_dialog.hit_test(x, y) {
+                        DialogClick::Confirm => self.confirm_permission_mode_dialog(),
+                        DialogClick::Cancel => self.cancel_permission_mode_dialog(),
+                        DialogClick::Permission(index) => {
+                            if self.permission_mode_dialog.click_permission(index) {
+                                // Second click on the same row: start right away.
+                                self.confirm_permission_mode_dialog();
+                            }
+                        }
+                        DialogClick::Model(index) => {
+                            self.permission_mode_dialog.select_model(index)
+                        }
+                        DialogClick::Effort(index) => {
+                            self.permission_mode_dialog.select_effort(index)
+                        }
+                        DialogClick::None => {}
                     }
-                    self.active_pane = PaneId::Claude;
                     return;
                 }
 

@@ -242,7 +242,7 @@ impl App {
         // Permission mode dialog (render on top, before drag ghost)
         // Don't show if update dialog is visible - update takes priority
         if self.permission_mode_dialog.visible && !self.update_state.show_dialog {
-            ui::permission_mode::render(frame, area, &self.permission_mode_dialog);
+            ui::permission_mode::render(frame, area, &mut self.permission_mode_dialog);
         }
 
         if self.agent_startup.visible {

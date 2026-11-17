@@ -32,7 +32,7 @@
 | F9 | File Menu (File Browser) / Copy last command block (Terminal) or last N lines (Claude, LazyGit) |
 | Shift+F9 | Copy last N lines with interactive count input (Terminal panes) |
 
-In a backend startup screen, `Tab` / `Shift+Tab` changes the section, arrow keys change the selected option, and text can be entered directly in Model or Agent sections. `Enter` starts with the displayed selections; `Esc` starts with configured defaults. Claude's startup screen can be switched off in Settings → General → *Show Claude Start Dialog*: Claude then starts straight away with the values last confirmed there with `Enter` — including a session or worktree name, so clear those first if you do not want them reused.
+In a backend startup screen, `Tab` / `Shift+Tab` changes the section, arrow keys change the selected option, and text can be entered directly in Model or Agent sections. `Enter` starts with the displayed selections; `Esc` starts with configured defaults. Claude's startup screen can be switched off in Settings → General → *Show Claude Start Dialog*: Claude then starts straight away with the values last confirmed there with `Enter` for the project it was launched in.
 
 #### Settings / Input Dialogs (when editing a text field)
 | Key | Action |
@@ -215,19 +215,23 @@ When all upper panes (File Browser, Preview, LazyGit, Terminal) are hidden, Clau
 
 ### Claude Startup Dialog
 
-At startup, a unified multi-section dialog lets you pre-configure Claude Code. Five sections: **Permission Mode** (6 modes incl. `auto`), **Model** (Fable/Opus/Sonnet/Haiku), **Effort** (low…max), **Session Name**, and **Worktree**.
+At startup, a dialog lets you pre-configure Claude Code in three sections: **Permission Mode** (6 modes incl. `auto`), **Model** (Fable/Opus/Sonnet/Haiku) and **Effort** (low…max). Everything works with the keyboard or the mouse.
 
-| Key | Action |
-|-----|--------|
+| Input | Action |
+|-------|--------|
 | Tab / Shift+Tab | Switch between sections |
 | ↑/↓ or k/j | Navigate items in Permission list |
 | ←/→ or ↑/↓ | Select radio option in Model/Effort |
-| Left/Right/Home/End | Cursor in text fields (Session/Worktree) |
-| Backspace/Delete | Edit text fields |
-| Enter | Confirm selection and persist to config |
-| Esc | Use saved defaults |
+| Click on an option | Select it |
+| Double-click on a permission mode | Select it and start |
+| Enter / click **Starten** | Start and remember the selection for this project |
+| Esc / click **Gemerkte Werte** | Start with the remembered values, save nothing |
 
-All values persist to `~/.config/ai-workbench/config.yaml` under `claude.*` (`default_permission_mode`, `default_model`, `default_effort`, `default_session_name`, `default_worktree`) and are pre-selected on next launch.
+A click outside the dialog does nothing.
+
+The selection is remembered **per project** — the git repository the workbench was launched in (the nearest directory above containing `.git`), or the launch directory if there is none. It is stored in `~/.config/ai-workbench/session.yaml` under `projects`, never inside the project. A project opened for the first time starts with the most recent choice made anywhere, which is also kept in `config.yaml` under `claude.*` (`default_permission_mode`, `default_model`, `default_effort`).
+
+Session name and worktree are no longer part of the dialog (since v1.18.0); `default_session_name` and `default_worktree` in `config.yaml` are ignored. To start Claude with `--name` or `--worktree`, add the flag to `pty.claude_command`.
 
 **Permission Modes (6):** `default`, `acceptEdits`, `auto`, `plan`, `bypassPermissions`, `dangerouslySkip`. The new `auto` mode lets Claude check each tool call for risky actions and prompt injection before executing — ideal for long-running tasks.
 
@@ -515,7 +519,7 @@ Please attach the file when reporting a problem.
 | F12 | Hilfe |
 | Esc | Dialoge/Hilfe schließen |
 
-In einem Backend-Startdialog wechseln `Tab` / `Shift+Tab` die Sektion, die Pfeiltasten ändern die Auswahl und in Modell- oder Agent-Sektionen kann direkt Text eingegeben werden. `Enter` startet mit den angezeigten Optionen; `Esc` verwendet die konfigurierten Standardwerte. Claudes Startdialog lässt sich unter Einstellungen → General → *Show Claude Start Dialog* abschalten: Claude startet dann sofort mit den zuletzt dort per `Enter` bestätigten Werten — einschließlich eines Session- oder Worktree-Namens; diese Felder vorher leeren, wenn sie nicht wiederverwendet werden sollen.
+In einem Backend-Startdialog wechseln `Tab` / `Shift+Tab` die Sektion, die Pfeiltasten ändern die Auswahl und in Modell- oder Agent-Sektionen kann direkt Text eingegeben werden. `Enter` startet mit den angezeigten Optionen; `Esc` verwendet die konfigurierten Standardwerte. Claudes Startdialog lässt sich unter Einstellungen → General → *Show Claude Start Dialog* abschalten: Claude startet dann sofort mit den zuletzt dort per `Enter` bestätigten Werten für das Projekt, in dem sie gestartet wurde.
 
 #### Einstellungen / Eingabedialoge (bei Bearbeitung eines Textfelds)
 | Taste | Aktion |
@@ -701,19 +705,23 @@ Wenn alle oberen Bereiche (Dateibrowser, Vorschau, LazyGit, Terminal) ausgeblend
 
 ### Claude Startup-Dialog
 
-Beim Start erscheint ein vereinheitlichter Multi-Sektion-Dialog zur Vorkonfiguration von Claude Code. Fünf Sektionen: **Permission Mode** (6 Modi inkl. `auto`), **Model** (Fable/Opus/Sonnet/Haiku), **Effort** (low…max), **Session-Name** und **Worktree**.
+Beim Start erscheint ein Dialog zur Vorkonfiguration von Claude Code mit drei Sektionen: **Permission Mode** (6 Modi inkl. `auto`), **Model** (Fable/Opus/Sonnet/Haiku) und **Effort** (low…max). Alles lässt sich mit Tastatur oder Maus bedienen.
 
-| Taste | Aktion |
-|-------|--------|
+| Eingabe | Aktion |
+|---------|--------|
 | Tab / Shift+Tab | Zwischen Sektionen wechseln |
 | ↑/↓ oder k/j | Items in Permission-Liste navigieren |
-| ←/→ oder ↑/↓ | Radio-Option in Model/Effort waehlen |
-| Links/Rechts/Home/End | Cursor in Textfeldern (Session/Worktree) |
-| Backspace/Entf | Textfelder editieren |
-| Enter | Auswahl bestaetigen und in Config speichern |
-| Esc | Gespeicherte Defaults verwenden |
+| ←/→ oder ↑/↓ | Radio-Option in Model/Effort wählen |
+| Klick auf eine Option | Option auswählen |
+| Doppelklick auf einen Permission Mode | Auswählen und starten |
+| Enter / Klick auf **Starten** | Starten und Auswahl für dieses Projekt merken |
+| Esc / Klick auf **Gemerkte Werte** | Mit den gemerkten Werten starten, nichts speichern |
 
-Alle Werte werden in `~/.config/ai-workbench/config.yaml` unter `claude.*` persistiert (`default_permission_mode`, `default_model`, `default_effort`, `default_session_name`, `default_worktree`) und beim naechsten Start vorselektiert.
+Ein Klick außerhalb des Dialogs bewirkt nichts.
+
+Die Auswahl wird **pro Projekt** gemerkt — das Git-Repository, in dem die Workbench gestartet wurde (das nächste übergeordnete Verzeichnis mit `.git`), sonst das Startverzeichnis. Gespeichert wird sie in `~/.config/ai-workbench/session.yaml` unter `projects`, nie im Projekt selbst. Ein Projekt, das zum ersten Mal geöffnet wird, startet mit der zuletzt irgendwo getroffenen Auswahl; diese steht zusätzlich in `config.yaml` unter `claude.*` (`default_permission_mode`, `default_model`, `default_effort`).
+
+Session-Name und Worktree gehören seit v1.18.0 nicht mehr zum Dialog; `default_session_name` und `default_worktree` in `config.yaml` werden ignoriert. Wer Claude mit `--name` oder `--worktree` starten will, ergänzt das Flag in `pty.claude_command`.
 
 **Permission Modes (6):** `default`, `acceptEdits`, `auto`, `plan`, `bypassPermissions`, `dangerouslySkip`. Der neue `auto`-Modus laesst Claude jeden Tool-Call auf riskante Aktionen und Prompt-Injection pruefen — ideal fuer Long-Running Tasks.
 

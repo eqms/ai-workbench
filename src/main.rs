@@ -22,7 +22,7 @@ use app::App;
 use backend::AiBackend;
 use clap::Parser;
 use config::load_config;
-use session::{load_session, save_session, SessionState};
+use session::{load_session, save_session};
 use std::io::Write;
 use std::path::PathBuf;
 use update::{check_for_update_with_version, UpdateCheckResult};
@@ -714,7 +714,7 @@ async fn async_main(
         }
     }
 
-    let session = load_session();
+    let mut session = load_session();
 
     // Resolve the active backend: explicit CLI argument wins, otherwise resume
     // the last-used backend from the session (default: Claude). The argument was
@@ -729,11 +729,8 @@ async fn async_main(
 
     // Persist the resolved backend so a subsequent argument-less run resumes it.
     // Preserve the daily-update timestamp — App::new updates it when it runs.
-    save_session(&SessionState {
-        last_cwd: session.last_cwd.clone(),
-        last_backend: backend,
-        last_claude_update: session.last_claude_update.clone(),
-    });
+    session.last_backend = backend;
+    save_session(&session);
 
     {
         let mut err = std::io::stderr();
